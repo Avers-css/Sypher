@@ -1,67 +1,23 @@
-name: Multi-Platform Release
+name: Multi-Platform Build & Release
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  build-desktop:
-    name: Build Desktop (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        include:
-          - os: windows-latest
-            artifact_name: Windows Installer (.exe)
-          - os: ubuntu-latest
-            artifact_name: Linux Package (.AppImage, .deb)
-          - os: macos-latest
-            artifact_name: macOS Disk Image (.dmg)
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Build Core
-        run: npx tsc -p packages/core/tsconfig.json
-
-      - name: Build Desktop Binaries
-        working-directory: packages/desktop
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            npm run build:win
-          elif [ "$RUNNER_OS" == "Linux" ]; then
-            npm run build:linux
-          else
-            npm run build:mac
-          fi
-        shell: bash
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          files: packages/desktop/release/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Java JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
@@ -70,6 +26,64 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build Android Release APK
+      - name: Build Android APK
         working-directory: packages/android/android
-        run: chmod +x gradlew && ./gradlew assembleRelease
+        run: |
+          chmod +x gradlew || gradle wrapper
+          gradle assembleDebug --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk ../../../release_artifacts/Sypher.apk || cp $(find app/build/outputs/apk/ -name "*.apk" | head -n 1) ../../../release_artifacts/Sypher.apk
+
+      - name: Upload APK to Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: release_artifacts/Sypher.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-desktop-multiplatform:
+    name: Package Desktop (Windows, Linux, macOS)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: Sypher-Linux-Portable.tar.gz
+          - os: macos-latest
+            artifact_name: Sypher-macOS-Portable.tar.gz
+          - os: windows-latest
+            artifact_name: Sypher-Windows.zip
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Build Core
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - name: Package Release
+        shell: bash
+        run: |
+          mkdir -p dist_release
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            powershell -Command "Compress-Archive -Path 'packages', 'docs', 'README.md', 'README.ru.md', 'LICENSE' -DestinationPath 'dist_release/Sypher-Windows.zip' -Force"
+          elif [ "${{ runner.os }}" == "macOS" ]; then
+            tar -czvf dist_release/Sypher-macOS-Portable.tar.gz packages docs README.md README.ru.md LICENSE
+          else
+            tar -czvf dist_release/Sypher-Linux-Portable.tar.gz packages docs README.md README.ru.md LICENSE
+          fi
+
+      - name: Upload Asset to Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist_release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

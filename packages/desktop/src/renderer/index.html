@@ -20,16 +20,21 @@
             <div class="status-indicator online pulse" title="Узел Mesh активен"></div>
           </div>
           <div class="user-meta">
-            <h2 class="username" id="mySypherId">syph1...7f8a</h2>
+            <h2 class="username" id="mySypherId" title="Нажмите, чтобы скопировать ваш ID">syph1...</h2>
             <div class="fingerprint-tag" id="myFingerprintTag" title="Сверить ключ">
               <svg class="icon-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               <span>E2EE Защищено</span>
             </div>
           </div>
         </div>
-        <button class="icon-button" id="btnSettings" title="Настройки узла" aria-label="Настройки узла">
-          <svg class="icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
+        <div class="header-actions">
+          <button class="icon-button" id="btnNewChat" title="Новый диалог по Sypher ID" aria-label="Новый диалог">
+            <svg class="icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <button class="icon-button" id="btnSettings" title="Настройки узла" aria-label="Настройки узла">
+            <svg class="icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+        </div>
       </header>
 
       <!-- Mesh Radar / Статус сети -->
@@ -39,8 +44,8 @@
             <svg class="icon-svg mesh-pulse-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5M12 12h.01M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg>
           </div>
           <div>
-            <div class="mesh-title">Локальная сеть Mesh</div>
-            <div class="mesh-subtitle" id="meshPeerCount">3 узла в радиодиапазоне (UDP/BLE)</div>
+            <div class="mesh-title">Локальный эфир Mesh</div>
+            <div class="mesh-subtitle" id="meshPeerCount">UDP Multicast &amp; BLE Mesh активны</div>
           </div>
         </div>
         <div class="radar-ping"></div>
@@ -49,7 +54,7 @@
       <!-- Поиск -->
       <div class="search-box">
         <svg class="icon-svg search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="searchInput" placeholder="Поиск чатов или ввод адреса syph1..." autocomplete="off">
+        <input type="text" id="searchInput" placeholder="Поиск чатов или фильтр по syph1..." autocomplete="off">
       </div>
 
       <!-- Список чатов -->
@@ -75,10 +80,10 @@
           </button>
           <div class="avatar" id="activeChatAvatar">M</div>
           <div class="peer-text-meta">
-            <h3 class="active-peer-name" id="activeChatName">Локальный радиоканал Mesh</h3>
+            <h3 class="active-peer-name" id="activeChatName">Общий радиоэфир Mesh</h3>
             <div class="active-peer-status" id="activeChatStatus">
               <span class="dot-online"></span>
-              <span id="activeChatStatusText">Ad-Hoc UDP/BLE Сеть (Без серверов)</span>
+              <span id="activeChatStatusText">Широковещательный канал (UDP: 239.255.77.88:7788)</span>
             </div>
           </div>
         </div>
@@ -99,7 +104,7 @@
         <div class="encryption-notice">
           <div class="notice-badge">
             <svg class="icon-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <span>Сообщения защищены сквозным шифрованием (X25519 &amp; ChaCha20-Poly1305). Серверы отсутствуют.</span>
+            <span id="encryptionNoticeText">Сквозное шифрование активного канала. Серверы отсутствуют.</span>
           </div>
         </div>
       </div>
@@ -110,7 +115,7 @@
           <button class="composer-icon-btn" id="btnAttach" title="Прикрепить файл" aria-label="Прикрепить файл">
             <svg class="icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           </button>
-          <textarea id="messageInput" placeholder="Написать зашифрованное сообщение..." rows="1"></textarea>
+          <textarea id="messageInput" placeholder="Написать сообщение в эфир..." rows="1"></textarea>
           <button class="send-button" id="btnSend" title="Отправить пакет в Mesh" aria-label="Отправить">
             <svg class="icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
@@ -119,6 +124,33 @@
         </div>
       </footer>
     </main>
+  </div>
+
+  <!-- Модальное окно создания нового диалога -->
+  <div class="modal-overlay hidden" id="newChatModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Новый зашифрованный диалог</h3>
+        <button class="close-modal" id="btnCloseNewChat" aria-label="Закрыть">
+          <svg class="icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Введите Sypher ID собеседника (скопируйте с другого телефона/ПК):</p>
+        <div class="settings-group">
+          <input type="text" class="input-field" id="newChatPeerIdInput" placeholder="syph1a9b2c3d..." autocomplete="off">
+        </div>
+        <button class="modal-action-btn primary" id="btnConfirmNewChat">
+          Открыть диалог
+        </button>
+        <div class="discovered-peers-section">
+          <label class="settings-label">Узлы, замеченные в эфире:</label>
+          <div id="discoveredPeersList" class="discovered-list">
+            <span class="empty-hint">Ожидание радиосигналов поблизости...</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Модальное окно верификации отпечатка ключа -->
@@ -131,10 +163,8 @@
         </button>
       </div>
       <div class="modal-body">
-        <p class="modal-hint">Сверьте этот 64-значный SHA-256 отпечаток с собеседником для исключения атак MITM:</p>
-        <div class="fingerprint-display" id="modalFingerprint">
-          7F2A 9C81 D0E4 11B3 44FE 8812 90AA 3BC7
-        </div>
+        <p class="modal-hint">Сверьте этот уникальный отпечаток ключа с собеседником для исключения атак перехвата:</p>
+        <div class="fingerprint-display" id="modalFingerprint"></div>
         <div class="qr-placeholder" id="modalQR">
           <svg width="140" height="140" viewBox="0 0 100 100" class="qr-svg">
             <rect width="100" height="100" fill="#121824"/>
@@ -171,25 +201,28 @@
       </div>
       <div class="modal-body">
         <div class="settings-group">
-          <label class="settings-label">Адрес узла (Sypher ID)</label>
-          <div class="settings-code" id="settingsNodeId">syph19k20fae37b981290aa3bc7</div>
+          <label class="settings-label">Ваш уникальный Sypher ID</label>
+          <div class="settings-code" id="settingsNodeId"></div>
+          <button class="modal-action-btn" id="btnCopyMyId" style="margin-top: 8px;">
+            <svg class="icon-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Скопировать мой Sypher ID
+          </button>
         </div>
         <div class="settings-group">
           <label class="settings-label">Активные транспорты</label>
           <div class="settings-pills">
             <span class="pill-active">UDP Multicast (239.255.77.88:7788)</span>
-            <span class="pill-active">BLE Radio Mesh (API 34)</span>
-            <span class="pill-inactive">Tor Onion v3 (Скрытый сервис)</span>
+            <span class="pill-active">BLE Radio Mesh (Bluetooth LE)</span>
+            <span class="pill-inactive">Tor Onion v3 (Опционально)</span>
           </div>
         </div>
         <div class="settings-group">
           <label class="settings-label">Криптографический стек</label>
           <div class="settings-info-box">
-            <div><strong>Обмен ключами:</strong> X25519 ECDH (Curve25519)</div>
+            <div><strong>Обмен ключами:</strong> X25519 ECDH</div>
             <div><strong>Сквозное шифрование:</strong> Signal Double Ratchet</div>
             <div><strong>Симметричный шифр:</strong> ChaCha20-Poly1305 AEAD</div>
-            <div><strong>Хеширование:</strong> BLAKE2b &amp; SHA-256 HKDF</div>
-            <div><strong>Защита памяти:</strong> Sodium Zeroize Secure Scrub</div>
+            <div><strong>Безопасность памяти:</strong> Zeroize RAM Scrub</div>
           </div>
         </div>
         <div class="settings-group">
@@ -208,7 +241,7 @@
       </div>
       <h3 class="burn-title">Экстренное уничтожение данных</h3>
       <p class="burn-desc">
-        Будут безвозвратно затерты все криптографические ключи, цепочки Double Ratchet, база сообщений и сессии в оперативной памяти и хранилище.
+        Будут безвозвратно затерты все криптографические ключи, история сообщений и идентификатор узла.
       </p>
       <div class="burn-actions">
         <button class="burn-cancel-btn" id="btnCancelBurn">Отмена</button>

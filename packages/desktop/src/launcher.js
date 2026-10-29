@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Sypher Universal Desktop Launcher
- * Launches Electron desktop GUI if available, or lightweight local HTTP server
- * with system browser integration across Linux, macOS, and Windows.
+ * Sypher Universal Desktop Launcher & Local Mesh Transport Daemon
+ * Provides static HTTP hosting, Server-Sent Events (SSE) bridge,
+ * and native UDP Multicast (239.255.77.88:7788) radio communications.
  */
 
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { exec, spawn } from 'node:child_process';
 
@@ -16,8 +17,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rendererDir = path.join(__dirname, 'renderer');
 
-const PORT = process.env.PORT || 7788;
-const HOST = '127.0.0.1';
+const HTTP_PORT = process.env.PORT || 7788;
+const HTTP_HOST = '127.0.0.1';
+
+const MULTICAST_ADDR = '239.255.77.88';
+const MULTICAST_PORT = 7788;
+
+const sseClients = new Set();
+let udpSocket = null;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -29,39 +36,96 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-function tryLaunchElectron() {
-  return new Promise((resolve) => {
-    try {
-      const electronProcess = spawn('npx', ['electron', '.'], {
-        cwd: path.join(__dirname, '..'),
-        stdio: 'ignore',
-        shell: true,
-      });
+// 1. Инициализация UDP Multicast сокета для общения без серверов
+function initUdpMulticast() {
+  try {
+    const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
-      electronProcess.on('error', () => resolve(false));
-      electronProcess.on('spawn', () => resolve(true));
+    socket.on('error', (err) => {
+      console.warn('[UDP Multicast] Socket warning:', err.message);
+    });
 
-      // Check if process exits immediately (e.g. electron missing)
-      setTimeout(() => {
-        if (electronProcess.exitCode !== null) {
-          resolve(false);
-        } else {
-          resolve(true);
+    socket.on('message', (msg, rinfo) => {
+      const raw = msg.toString('utf8');
+      // Транслируем входящий пакет во все открытые вкладки веб-интерфейса через SSE
+      for (const client of sseClients) {
+        try {
+          client.write(`data: ${raw}\n\n`);
+        } catch {
+          sseClients.delete(client);
         }
-      }, 1500);
-    } catch {
-      resolve(false);
-    }
+      }
+    });
+
+    socket.bind(MULTICAST_PORT, () => {
+      try {
+        socket.addMembership(MULTICAST_ADDR);
+        socket.setMulticastTTL(4);
+        socket.setMulticastLoopback(true);
+        udpSocket = socket;
+        console.log(`[+] UDP Multicast radio active on ${MULTICAST_ADDR}:${MULTICAST_PORT}`);
+      } catch (e) {
+        console.warn('[!] Failed to join multicast group:', e.message);
+      }
+    });
+  } catch (err) {
+    console.warn('[!] Could not initialize UDP socket:', err.message);
+  }
+}
+
+function broadcastUdp(rawString) {
+  if (!udpSocket) return;
+  const buffer = Buffer.from(rawString, 'utf8');
+  udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, MULTICAST_ADDR, (err) => {
+    if (err) console.error('[UDP] Send error:', err.message);
   });
 }
 
 function startWebServer() {
+  initUdpMulticast();
+
   const server = http.createServer((req, res) => {
-    let reqPath = req.url.split('?')[0];
-    if (reqPath === '/' || reqPath === '') {
-      reqPath = '/index.html';
+    const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = parsedUrl.pathname;
+
+    // API: Server-Sent Events для моментальной доставки входящих пакетов
+    if (pathname === '/api/mesh/events') {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.write(': ping\n\n');
+      sseClients.add(res);
+
+      req.on('close', () => {
+        sseClients.delete(res);
+      });
+      return;
     }
 
+    // API: Отправка пакета в локальную Mesh-сеть
+    if (pathname === '/api/mesh/send' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        if (body) {
+          broadcastUdp(body);
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(JSON.stringify({ status: 'ok' }));
+      });
+      return;
+    }
+
+    // Раздача статических файлов
+    let reqPath = pathname === '/' || pathname === '' ? '/index.html' : pathname;
     const safePath = path.normalize(reqPath).replace(/^(\.\.[\/\\])+/, '');
     const filePath = path.join(rendererDir, safePath);
 
@@ -82,22 +146,22 @@ function startWebServer() {
         'Cache-Control': 'no-cache',
       });
       res.end(content);
-    } catch (err) {
+    } catch {
       res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Internal Server Error');
     }
   });
 
-  server.listen(PORT, HOST, () => {
-    const url = `http://${HOST}:${PORT}`;
+  server.listen(HTTP_PORT, HTTP_HOST, () => {
+    const url = `http://${HTTP_HOST}:${HTTP_PORT}`;
     console.log(`
 ==============================================================
-   SYPHER MESH MESSENGER (Desktop & Web Engine)
+   SYPHER MESH MESSENGER (Production Desktop Engine)
    Zero-Knowledge, Anonymous, Serverless P2P Messenger
 ==============================================================
   [+] Active at:   ${url}
-  [+] Transports:  Local UDP Multicast & Bluetooth Mesh
-  [+] Cryptography: X25519 ECDH / Signal Double Ratchet / ChaCha20
+  [+] Radio Mesh:  UDP Multicast ${MULTICAST_ADDR}:${MULTICAST_PORT}
+  [+] Routing:     Ad-hoc Peer-to-Peer / Local Wi-Fi / Hotspot
 ==============================================================
 `);
     openBrowser(url);
@@ -105,6 +169,9 @@ function startWebServer() {
 
   process.on('SIGINT', () => {
     console.log('\n[*] Stopping Sypher node...');
+    if (udpSocket) {
+      try { udpSocket.close(); } catch {}
+    }
     server.close(() => process.exit(0));
   });
 }
@@ -128,13 +195,4 @@ function openBrowser(url) {
   });
 }
 
-async function main() {
-  const useWebOnly = process.argv.includes('--web') || process.argv.includes('--no-electron');
-  if (!useWebOnly) {
-    const launched = await tryLaunchElectron();
-    if (launched) return;
-  }
-  startWebServer();
-}
-
-main();
+startWebServer();

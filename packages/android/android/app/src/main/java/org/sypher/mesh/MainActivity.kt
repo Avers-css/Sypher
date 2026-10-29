@@ -3,21 +3,31 @@ package org.sypher.mesh
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.webkit.JavascriptInterface
 import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import org.json.JSONObject
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.MulticastSocket
+import kotlin.concurrent.thread
 
 /**
  * Main Activity for Sypher Android Client.
- * Displays the hardware-accelerated dark glassmorphism messenger interface
+ * Displays the hardware-accelerated dark glassmorphism messenger interface,
+ * bridges JavaScript to local UDP Multicast (239.255.77.88:7788),
  * and coordinates with the background SypherMeshService BLE radio.
  */
 class MainActivity : Activity() {
@@ -25,19 +35,22 @@ class MainActivity : Activity() {
     companion object {
         private const val TAG = "SypherMainActivity"
         private const val PERMISSION_REQUEST_CODE = 42
+        const val MULTICAST_GROUP = "239.255.77.88"
+        const val MULTICAST_PORT = 7788
     }
 
     private lateinit var webView: WebView
+    private var multicastLock: WifiManager.MulticastLock? = null
+    private var isMeshRunning = true
+    private var multicastSocket: MulticastSocket? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         try {
-            // Setup dark background immediately to prevent white flash
             window.decorView.setBackgroundColor(Color.parseColor("#0A0D14"))
 
-            // Initialize hardware-accelerated dark WebView
             webView = WebView(this).apply {
                 setBackgroundColor(Color.parseColor("#0A0D14"))
                 settings.apply {
@@ -50,11 +63,16 @@ class MainActivity : Activity() {
                     useWideViewPort = true
                     loadWithOverviewMode = true
                 }
+
+                // Expose Native Android Mesh Bridge to JavaScript
+                addJavascriptInterface(AndroidMeshBridge(this@MainActivity), "AndroidBridge")
+
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         Log.i(TAG, "Sypher UI loaded successfully: $url")
                     }
                 }
+
                 webChromeClient = object : WebChromeClient() {
                     override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
                         AlertDialog.Builder(this@MainActivity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
@@ -84,11 +102,71 @@ class MainActivity : Activity() {
             setContentView(webView)
             webView.loadUrl("file:///android_asset/index.html")
 
-            // Request runtime permissions on Android 12+ and start mesh service
+            // Start native UDP Multicast listener for Wi-Fi / Hotspot radio communication
+            startUdpMulticastListener()
+
+            // Request runtime permissions on Android 12+ and start BLE mesh service
             checkAndRequestPermissions()
 
         } catch (t: Throwable) {
             Log.e(TAG, "Fatal error initializing MainActivity UI", t)
+        }
+    }
+
+    fun broadcastUdpPacket(payloadJson: String) {
+        thread(name = "SypherUdpSender", isDaemon = true) {
+            try {
+                val group = InetAddress.getByName(MULTICAST_GROUP)
+                val socket = DatagramSocket()
+                val bytes = payloadJson.toByteArray(Charsets.UTF_8)
+                val packet = DatagramPacket(bytes, bytes.size, group, MULTICAST_PORT)
+                socket.send(packet)
+                socket.close()
+                Log.d(TAG, "Broadcast UDP packet (${bytes.size} bytes) to $MULTICAST_GROUP:$MULTICAST_PORT")
+            } catch (e: Exception) {
+                Log.e(TAG, "UDP send error: ${e.message}")
+            }
+        }
+    }
+
+    private fun startUdpMulticastListener() {
+        try {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifiManager?.createMulticastLock("sypherMulticastLock")?.apply {
+                setReferenceCounted(true)
+                acquire()
+            }
+            Log.i(TAG, "MulticastLock acquired successfully")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not acquire MulticastLock: ${e.message}")
+        }
+
+        thread(name = "SypherUdpListener", isDaemon = true) {
+            try {
+                val group = InetAddress.getByName(MULTICAST_GROUP)
+                val socket = MulticastSocket(MULTICAST_PORT).apply {
+                    reuseAddress = true
+                    joinGroup(group)
+                }
+                multicastSocket = socket
+                val buffer = ByteArray(65535)
+                Log.i(TAG, "UDP Multicast listener active on $MULTICAST_GROUP:$MULTICAST_PORT")
+
+                while (isMeshRunning) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    socket.receive(packet)
+                    val raw = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
+
+                    runOnUiThread {
+                        if (::webView.isInitialized) {
+                            val jsArg = JSONObject.quote(raw)
+                            webView.evaluateJavascript("if(window.onMeshPacketReceived) window.onMeshPacketReceived($jsArg);", null)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "UDP multicast listener stopped: ${e.message}")
+            }
         }
     }
 
@@ -142,6 +220,19 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        isMeshRunning = false
+        try {
+            multicastSocket?.close()
+        } catch (e: Exception) {}
+        try {
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
+        } catch (e: Exception) {}
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (::webView.isInitialized) {
@@ -157,5 +248,15 @@ class MainActivity : Activity() {
         } else {
             super.onBackPressed()
         }
+    }
+
+    class AndroidMeshBridge(private val activity: MainActivity) {
+        @JavascriptInterface
+        fun sendMeshPacket(payloadJson: String) {
+            activity.broadcastUdpPacket(payloadJson)
+        }
+
+        @JavascriptInterface
+        fun isAvailable(): Boolean = true
     }
 }

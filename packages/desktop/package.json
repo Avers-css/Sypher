@@ -19,5 +19,5 @@
     "electron-builder": "^25.1.8"
   },
   "author": "Sypher Team",
-  "license": "Apache-2.0"
+  "license": "MIT"
 }

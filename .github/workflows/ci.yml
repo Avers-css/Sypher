@@ -26,7 +26,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Compile TypeScript Core
         run: npx tsc -p packages/core/tsconfig.json

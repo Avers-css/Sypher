@@ -4,35 +4,34 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Outer Cyber Hex Shield -->
+
+    <!-- Outer Strict Faceted Shield Contour -->
     <path
         android:strokeColor="#00F0FF"
-        android:strokeWidth="3.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M54,20 L82,34 L82,64 L54,88 L26,64 L26,34 Z" />
+        android:strokeWidth="3.2"
+        android:strokeLineCap="square"
+        android:strokeLineJoin="miter"
+        android:pathData="M54,16 L84,32 L84,70 L54,92 L24,70 L24,32 Z" />
 
-    <!-- Inner Shield Accent -->
+    <!-- Inner Tactical Sub-Contour -->
     <path
-        android:strokeColor="#00FFAA"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M54,28 L74,38 L74,60 L54,78 L34,60 L34,38 Z" />
+        android:strokeColor="#1E293B"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="square"
+        android:strokeLineJoin="miter"
+        android:pathData="M54,23 L77,35 L77,66 L54,85 L31,66 L31,35 Z" />
 
-    <!-- Central Cipher Lock Core -->
+    <!-- Strict Geometric Cypher Monogram 'S' -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="square"
+        android:strokeLineJoin="miter"
+        android:pathData="M66,37 L44,37 L40,49 L64,53 L68,65 L64,71 L40,71" />
+
+    <!-- Central Cryptographic Core Accent -->
     <path
         android:fillColor="#00F0FF"
-        android:pathData="M54,42 A6,6 0 0 1 60,48 L62,58 L46,58 L48,48 A6,6 0 0 1 54,42 Z" />
+        android:pathData="M51,51 L57,51 L57,57 L51,57 Z" />
 
-    <!-- Radiating Mesh Nodes -->
-    <path
-        android:fillColor="#00FFAA"
-        android:pathData="M54,66 A3,3 0 1 1 54,60 A3,3 0 1 1 54,66 Z" />
-    <path
-        android:fillColor="#00F0FF"
-        android:pathData="M42,52 A2.5,2.5 0 1 1 42,47 A2.5,2.5 0 1 1 42,52 Z" />
-    <path
-        android:fillColor="#00F0FF"
-        android:pathData="M66,52 A2.5,2.5 0 1 1 66,47 A2.5,2.5 0 1 1 66,52 Z" />
 </vector>

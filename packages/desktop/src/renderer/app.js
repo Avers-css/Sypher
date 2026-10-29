@@ -623,6 +623,12 @@
         return;
       }
     }
+
+    if (packet && packet.type === 'BLE_PEER_DISCOVERED') {
+      window.onBlePeerDiscovered(packet.peerId, packet.rssi, packet.distance, packet.mac);
+      return;
+    }
+
     handleIncomingPacket(packet);
   };
 

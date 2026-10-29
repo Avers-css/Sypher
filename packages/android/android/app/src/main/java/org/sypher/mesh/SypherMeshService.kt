@@ -155,6 +155,16 @@ class SypherMeshService : Service() {
 
             val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
             gattServer = bluetoothManager?.openGattServer(this, object : BluetoothGattServerCallback() {
+                override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
+                    super.onConnectionStateChange(device, status, newState)
+                    if (newState == BluetoothProfile.STATE_CONNECTED && device != null) {
+                        val shortId = device.address.replace(":", "").takeLast(6).lowercase()
+                        val peerId = "syp-peer-" + shortId
+                        Log.i(TAG, "BLE device connected to GATT Server: $peerId (${device.address})")
+                        MainActivity.instance?.notifyBlePeerDiscovered(peerId, -55, device.address)
+                    }
+                }
+
                 override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
                     Log.d(TAG, "GATT Server MTU changed to $mtu for ${device?.address}")
                 }

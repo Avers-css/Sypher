@@ -30,19 +30,27 @@ namespace SypherDesktop
 
         static void StartHttpServer()
         {
-            listener = new HttpListener();
-            listener.Prefixes.Add("http://127.0.0.1:" + port + "/");
-            try
+            for (int p = 7780; p <= 7820; p++)
             {
-                listener.Start();
+                try
+                {
+                    listener = new HttpListener();
+                    listener.Prefixes.Add("http://127.0.0.1:" + p + "/");
+                    listener.Start();
+                    port = p;
+                    break;
+                }
+                catch
+                {
+                    if (listener != null)
+                    {
+                        try { listener.Close(); } catch { }
+                        listener = null;
+                    }
+                }
             }
-            catch
-            {
-                port = 7795;
-                listener = new HttpListener();
-                listener.Prefixes.Add("http://127.0.0.1:" + port + "/");
-                listener.Start();
-            }
+
+            if (listener == null) return;
 
             Thread serverThread = new Thread(() =>
             {
@@ -94,17 +102,27 @@ namespace SypherDesktop
         static void LaunchAppWindow()
         {
             string url = "http://127.0.0.1:" + port + "/";
-            string edgePath = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
-            if (!File.Exists(edgePath))
+            string[] possibleBrowsers = new string[]
             {
-                edgePath = @"C:\Program Files\Microsoft\Edge\Application\msedge.exe";
+                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\Edge\Application\msedge.exe"),
+                @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                @"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+            };
+
+            string browserPath = null;
+            foreach (var b in possibleBrowsers)
+            {
+                if (File.Exists(b)) { browserPath = b; break; }
             }
 
-            if (File.Exists(edgePath))
+            if (!string.IsNullOrEmpty(browserPath))
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = edgePath,
+                    FileName = browserPath,
                     Arguments = "--app=" + url + " --window-size=1200,800",
                     UseShellExecute = true
                 });

@@ -56,6 +56,9 @@ class MainActivity : Activity() {
     // Discovered BLE peer MAC mapping: peerId -> macAddress
     private val blePeerMap = ConcurrentHashMap<String, String>()
 
+    // Sneakernet store-and-forward queue for passing offline devices
+    private val pendingSneakernetPackets = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -225,6 +228,12 @@ class MainActivity : Activity() {
             }
 
             // 2. Relay via BLE GATT to all discovered nearby passerby
+            // And save to sneakernet queue for passing devices
+            if (pendingSneakernetPackets.size > 40) {
+                pendingSneakernetPackets.poll()
+            }
+            pendingSneakernetPackets.add(payloadJson)
+
             blePeerMap.values.forEach { mac ->
                 try {
                     SypherMeshService.instance?.sendBlePacket(mac, payloadJson)
@@ -380,6 +389,16 @@ class MainActivity : Activity() {
                 webView.evaluateJavascript("if(window.onBlePeerDiscovered) window.onBlePeerDiscovered('$peerId', $rssi, $distance, '$mac');", null)
             }
         }
+
+        // Automatic sneakernet relay: transmit all pending packets to discovered peer
+        thread(name = "SypherSneakernetDrain", isDaemon = true) {
+            for (queuedPacket in pendingSneakernetPackets) {
+                try {
+                    SypherMeshService.instance?.sendBlePacket(mac, queuedPacket)
+                    Thread.sleep(180)
+                } catch (e: Exception) {}
+            }
+        }
     }
 
     fun getLocalIpAddress(): String {
@@ -415,11 +434,14 @@ class MainActivity : Activity() {
             if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_CONNECT)
             }
-        } else {
-            // Android 6-11 requires fine location for BLE scanning
-            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
-            }
+        }
+
+        // Location is needed on Android for BLE proximity scanning
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -492,6 +514,11 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun sendMeshPacket(payloadJson: String) {
             activity.broadcastUdpPacket(payloadJson)
+        }
+
+        @JavascriptInterface
+        fun sendDirectBlePacket(mac: String, payloadJson: String) {
+            SypherMeshService.instance?.sendBlePacket(mac, payloadJson)
         }
 
         @JavascriptInterface

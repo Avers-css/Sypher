@@ -272,6 +272,7 @@ class SypherMeshService : Service() {
 
             val pUuid = ParcelUuid(SYPHER_SERVICE_UUID)
             val cleanId = currentNodeId.replace("syp-", "").take(6).toByteArray(Charsets.UTF_8)
+            val mfgPayload = ("SYP_DROID_" + currentNodeId.takeLast(4)).toByteArray(Charsets.UTF_8)
 
             // Primary Advertise Data (Under 10 bytes)
             val advertiseData = AdvertiseData.Builder()
@@ -280,10 +281,10 @@ class SypherMeshService : Service() {
                 .addServiceUuid(pUuid)
                 .build()
 
-            // Secondary Scan Response Data (Under 16 bytes)
+            // Secondary Scan Response Data (Under 20 bytes)
             val scanResponseData = AdvertiseData.Builder()
                 .addServiceData(pUuid, cleanId)
-                .addManufacturerData(0x5950, cleanId)
+                .addManufacturerData(0x5950, mfgPayload)
                 .build()
 
             bleAdvertiser?.stopAdvertising(object : AdvertiseCallback() {})
@@ -323,24 +324,39 @@ class SypherMeshService : Service() {
 
                     val mfgData = scanRecord.getManufacturerSpecificData(0x5950)
                     val serviceData = scanRecord.getServiceData(pUuid)
-                    val devName = result.device.name ?: ""
-
+                    val hasServiceUuid = scanRecord.serviceUuids?.contains(pUuid) == true
                     val mfgStr = if (mfgData != null) String(mfgData, Charsets.UTF_8) else ""
-                    val isWin = mfgStr.contains("WIN", ignoreCase = true) ||
-                                devName.contains("Windows", ignoreCase = true) ||
-                                devName.contains("PC", ignoreCase = true)
-                    val isLin = mfgStr.contains("LIN", ignoreCase = true) || devName.contains("Linux", ignoreCase = true)
-                    val isMac = mfgStr.contains("MAC", ignoreCase = true) || devName.contains("Mac", ignoreCase = true)
+
+                    // STRICT FILTER: Discard any foreign Bluetooth devices (smartwatches, TVs, random Macs, iPhones)
+                    // A device MUST have Sypher Service UUID or Sypher Manufacturer Data (0x5950 with SYP prefix)
+                    val isSypherPeer = hasServiceUuid || serviceData != null || (mfgData != null && mfgStr.startsWith("SYP"))
+                    if (!isSypherPeer) {
+                        return
+                    }
+
+                    val isWin = mfgStr.contains("WIN", ignoreCase = true)
+                    val isLin = mfgStr.contains("LIN", ignoreCase = true)
+                    val isMac = mfgStr.contains("MAC", ignoreCase = true)
+                    val isDroid = mfgStr.contains("DROID", ignoreCase = true) || hasServiceUuid || serviceData != null
 
                     val prefix = when {
                         isWin -> "syp-win-"
                         isLin -> "syp-lin-"
                         isMac -> "syp-mac-"
-                        else -> "syp-droid-"
+                        isDroid -> "syp-droid-"
+                        else -> "syp-node-"
+                    }
+
+                    val friendlyName = when {
+                        isWin -> "Компьютер Windows"
+                        isLin -> "Компьютер Linux"
+                        isMac -> "Компьютер Mac"
+                        isDroid -> "Телефон Android"
+                        else -> "Узел Sypher"
                     }
 
                     val shortId = if (mfgData != null && mfgData.isNotEmpty()) {
-                        val clean = mfgStr.replace("SYP", "").replace("_WIN", "").replace("_LIN", "").replace("_MAC", "").trim()
+                        val clean = mfgStr.replace("SYP", "").replace("_WIN", "").replace("_LIN", "").replace("_MAC", "").replace("_DROID", "").replace("_", "").trim()
                         if (clean.isNotEmpty()) clean.take(6) else result.device.address.replace(":", "").takeLast(6).lowercase()
                     } else if (serviceData != null && serviceData.isNotEmpty()) {
                         String(serviceData, Charsets.UTF_8).take(6)
@@ -354,7 +370,7 @@ class SypherMeshService : Service() {
                     Log.d(TAG, "Discovered Sypher BLE Peer: $peerId (RSSI: $rssi, MAC: ${result.device.address})")
 
                     // Forward discovered passerby to UI & drain any pending sneakernet packets
-                    MainActivity.instance?.notifyBlePeerDiscovered(peerId, rssi, result.device.address)
+                    MainActivity.instance?.notifyBlePeerDiscovered(peerId, rssi, result.device.address, friendlyName)
                 }
 
                 override fun onScanFailed(errorCode: Int) {

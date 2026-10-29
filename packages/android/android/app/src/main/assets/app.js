@@ -444,27 +444,27 @@
     var badgeText = 'MESH';
     var iconLetter = 'S';
 
-    if (id.indexOf('syp-win-') !== -1 || name.toLowerCase().indexOf('windows') !== -1 || name.toLowerCase().indexOf('pc') !== -1) {
+    if (id.indexOf('syp-win-') !== -1 || name === 'Компьютер Windows') {
       platform = 'Компьютер Windows';
       badgeClass = 'pill-win';
       badgeText = 'WIN';
       iconLetter = 'W';
-    } else if (id.indexOf('syp-droid-') !== -1 || name.toLowerCase().indexOf('android') !== -1) {
+    } else if (id.indexOf('syp-droid-') !== -1 || name === 'Телефон Android') {
       platform = 'Телефон Android';
       badgeClass = 'pill-droid';
       badgeText = 'ANDROID';
       iconLetter = 'A';
-    } else if (id.indexOf('syp-lin-') !== -1 || name.toLowerCase().indexOf('linux') !== -1) {
+    } else if (id.indexOf('syp-lin-') !== -1 || name === 'Компьютер Linux') {
       platform = 'Компьютер Linux';
       badgeClass = 'pill-linux';
       badgeText = 'LINUX';
       iconLetter = 'L';
-    } else if (id.indexOf('syp-mac-') !== -1 || name.toLowerCase().indexOf('mac') !== -1) {
+    } else if (id.indexOf('syp-mac-') !== -1 || name === 'Компьютер Mac') {
       platform = 'Компьютер Mac';
       badgeClass = 'pill-apple';
       badgeText = 'MAC';
       iconLetter = 'M';
-    } else if (id.indexOf('syp-ios-') !== -1 || name.toLowerCase().indexOf('iphone') !== -1) {
+    } else if (id.indexOf('syp-ios-') !== -1 || name === 'Apple iPhone') {
       platform = 'Apple iPhone';
       badgeClass = 'pill-apple';
       badgeText = 'IOS';
@@ -473,7 +473,7 @@
 
     var shortCode = id.replace(/syp-(win-|droid-|lin-|mac-|ios-|node-)?/g, '').toUpperCase();
     if (shortCode.length > 4) shortCode = shortCode.slice(-4);
-    var title = name || (platform + ' #' + (shortCode || 'PEER'));
+    var title = (name && name !== id) ? name : (platform + ' #' + (shortCode || 'PEER'));
 
     return {
       title: title,
@@ -501,9 +501,9 @@
 
     var peers = Object.values(state.discoveredPeers);
     var now = Date.now();
-    // Оставляем узлы, видимые последние 2 минуты
+    // Оставляем узлы, видимые последние 45 секунд
     peers = peers.filter(function (p) {
-      return now - p.lastSeen < 120000;
+      return (now - p.lastSeen < 45000) && p.id && p.id.indexOf('syp-') === 0;
     });
 
     if (badge) badge.textContent = String(peers.length);

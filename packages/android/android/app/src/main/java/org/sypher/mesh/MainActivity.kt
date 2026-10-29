@@ -385,7 +385,7 @@ class MainActivity : Activity() {
         }
     }
 
-    fun notifyBlePeerDiscovered(peerId: String, rssi: Int, mac: String) {
+    fun notifyBlePeerDiscovered(peerId: String, rssi: Int, mac: String, name: String = "") {
         blePeerMap[peerId] = mac
         val now = System.currentTimeMillis()
         val lastTime = lastNotifyTimes[peerId] ?: 0L
@@ -396,7 +396,7 @@ class MainActivity : Activity() {
             val distance = Math.round(Math.pow(10.0, (-59.0 - rssi) / 20.0) * 10.0) / 10.0
             runOnUiThread {
                 if (::webView.isInitialized) {
-                    webView.evaluateJavascript("if(window.onBlePeerDiscovered) window.onBlePeerDiscovered('$peerId', $rssi, $distance, '$mac');", null)
+                    webView.evaluateJavascript("if(window.onBlePeerDiscovered) window.onBlePeerDiscovered('$peerId', $rssi, $distance, '$mac', '$name');", null)
                 }
             }
         }

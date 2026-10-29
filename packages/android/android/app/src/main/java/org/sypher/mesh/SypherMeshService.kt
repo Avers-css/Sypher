@@ -9,6 +9,8 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.le.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelUuid
@@ -26,7 +28,6 @@ class SypherMeshService : Service() {
         const val TAG = "SypherMeshService"
         const val CHANNEL_ID = "sypher_mesh_channel"
         const val NOTIFICATION_ID = 1337
-        // Sypher Mesh Service UUID
         val SYPHER_SERVICE_UUID: UUID = UUID.fromString("00005950-0000-1000-8000-00805f9b34fb")
     }
 
@@ -36,64 +37,112 @@ class SypherMeshService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-        val notification = buildOngoingNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            createNotificationChannel()
+            val notification = buildOngoingNotification()
 
-        initBluetoothRadio()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+
+            initBluetoothRadio()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error in service onCreate", t)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startMeshRadio()
+        try {
+            startMeshRadio()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error starting mesh radio in service", t)
+        }
         return START_STICKY
     }
 
     private fun initBluetoothRadio() {
-        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        bluetoothAdapter = bluetoothManager.adapter
-        bleScanner = bluetoothAdapter?.bluetoothLeScanner
-        bleAdvertiser = bluetoothAdapter?.bluetoothLeAdvertiser
+        try {
+            val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            bluetoothAdapter = bluetoothManager?.adapter
+            if (bluetoothAdapter?.isEnabled == true) {
+                bleScanner = bluetoothAdapter?.bluetoothLeScanner
+                bleAdvertiser = bluetoothAdapter?.bluetoothLeAdvertiser
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Bluetooth not accessible or disabled: ${t.message}")
+        }
     }
 
     private fun startMeshRadio() {
+        if (bluetoothAdapter == null || bluetoothAdapter?.isEnabled != true) {
+            Log.i(TAG, "Bluetooth is disabled or unavailable. Mesh waiting for radio activation.")
+            return
+        }
+
+        // Check runtime permission on Android 12+ (API 31+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "Bluetooth permissions not yet granted by user.")
+                return
+            }
+        }
+
         // 1. Start Low-Power BLE Advertising
-        val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_LOW)
-            .setConnectable(true)
-            .build()
+        try {
+            val settings = AdvertiseSettings.Builder()
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_LOW)
+                .setConnectable(true)
+                .build()
 
-        val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false)
-            .addServiceUuid(ParcelUuid(SYPHER_SERVICE_UUID))
-            .build()
+            val data = AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .addServiceUuid(ParcelUuid(SYPHER_SERVICE_UUID))
+                .build()
 
-        bleAdvertiser?.startAdvertising(settings, data, object : AdvertiseCallback() {
-            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-                Log.i(TAG, "BLE Mesh beacon broadcasting successfully")
-            }
-            override fun onStartFailure(errorCode: Int) {
-                Log.w(TAG, "BLE advertising failure: $errorCode")
-            }
-        })
-
-        // 2. Start BLE Scanning with Batching
-        val scanSettings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
-            .build()
-
-        val scanFilter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(SYPHER_SERVICE_UUID))
-            .build()
-
-        bleScanner?.startScan(listOf(scanFilter), scanSettings, object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult?) {
-                result?.let {
-                    Log.d(TAG, "Discovered Sypher Mesh Peer: ${it.device.address}")
-                    // Trigger packet exchange / Bloom filter synchronization
+            bleAdvertiser?.startAdvertising(settings, data, object : AdvertiseCallback() {
+                override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+                    Log.i(TAG, "BLE Mesh beacon broadcasting successfully")
                 }
-            }
-        })
+                override fun onStartFailure(errorCode: Int) {
+                    Log.w(TAG, "BLE advertising failure: $errorCode")
+                }
+            })
+        } catch (e: SecurityException) {
+            Log.w(TAG, "SecurityException starting BLE advertiser: ${e.message}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error starting BLE advertiser: ${t.message}")
+        }
+
+        // 2. Start BLE Scanning
+        try {
+            val scanSettings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+                .build()
+
+            val scanFilter = ScanFilter.Builder()
+                .setServiceUuid(ParcelUuid(SYPHER_SERVICE_UUID))
+                .build()
+
+            bleScanner?.startScan(listOf(scanFilter), scanSettings, object : ScanCallback() {
+                override fun onScanResult(callbackType: Int, result: ScanResult?) {
+                    result?.let {
+                        Log.d(TAG, "Discovered Sypher Mesh Peer: ${it.device.address}")
+                    }
+                }
+            })
+        } catch (e: SecurityException) {
+            Log.w(TAG, "SecurityException starting BLE scanner: ${e.message}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error starting BLE scanner: ${t.message}")
+        }
     }
 
     private fun createNotificationChannel() {
@@ -119,7 +168,7 @@ class SypherMeshService : Service() {
         }
 
         return builder
-            .setContentTitle("Sypher Mesh Active")
+            .setContentTitle("Sypher Mesh")
             .setContentText("Local peer-to-peer radio active • 0 servers")
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setOngoing(true)
@@ -128,8 +177,12 @@ class SypherMeshService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        bleAdvertiser?.stopAdvertising(object : AdvertiseCallback() {})
-        bleScanner?.stopScan(object : ScanCallback() {})
+        try {
+            bleAdvertiser?.stopAdvertising(object : AdvertiseCallback() {})
+            bleScanner?.stopScan(object : ScanCallback() {})
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error stopping radio in onDestroy: ${t.message}")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

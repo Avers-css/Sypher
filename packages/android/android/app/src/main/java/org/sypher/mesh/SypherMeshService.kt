@@ -320,7 +320,7 @@ class SypherMeshService : Service() {
                     result ?: return
                     val scanRecord = result.scanRecord ?: return
 
-                    val mfgData = scanRecord.getManufacturerData(0x5950)
+                    val mfgData = scanRecord.getManufacturerSpecificData(0x5950)
                     val serviceData = scanRecord.getServiceData(pUuid)
                     val devName = result.device.name ?: ""
 

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sypher — Zero-Knowledge Mesh Messenger</title>
+  <title>Sypher — Анонимный Mesh Мессенджер</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,90 +11,89 @@
 </head>
 <body>
   <div class="app-layout">
-    <!-- Sidebar: User profile + Dialogs list -->
+    <!-- Sidebar: Профиль пользователя + Список диалогов -->
     <aside class="sidebar">
       <header class="sidebar-header">
         <div class="user-profile">
           <div class="avatar-wrapper">
             <div class="avatar" id="myAvatar">S</div>
-            <div class="status-indicator online pulse" title="Mesh Node Active"></div>
+            <div class="status-indicator online pulse" title="Узел Mesh активен"></div>
           </div>
           <div class="user-meta">
             <h2 class="username" id="mySypherId">syph1...7f8a</h2>
-            <div class="fingerprint-tag" id="myFingerprintTag" title="Click to view full identity">
-              <span class="lock-icon">🔒</span> E2EE Active
+            <div class="fingerprint-tag" id="myFingerprintTag" title="Нажмите для просмотра ключа">
+              <span class="lock-icon">🔒</span> E2EE Активно
             </div>
           </div>
         </div>
-        <button class="icon-button" id="btnSettings" title="Node Settings & Security">⚙️</button>
+        <button class="icon-button" id="btnSettings" title="Настройки безопасности">⚙️</button>
       </header>
 
-      <!-- Mesh Radar / Status Banner -->
+      <!-- Mesh Radar / Статус сети -->
       <div class="mesh-banner">
         <div class="mesh-banner-info">
           <span class="mesh-pulse-icon">📡</span>
           <div>
-            <div class="mesh-title">Local Mesh Discovery</div>
-            <div class="mesh-subtitle" id="meshPeerCount">3 peers in radio range (UDP/BLE)</div>
+            <div class="mesh-title">Локальная сеть Mesh</div>
+            <div class="mesh-subtitle" id="meshPeerCount">3 узла в радиодиапазоне (UDP/BLE)</div>
           </div>
         </div>
         <div class="radar-ping"></div>
       </div>
 
-      <!-- Search bar -->
+      <!-- Поиск -->
       <div class="search-box">
         <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" placeholder="Search chats, contacts, or enter syph1... address">
+        <input type="text" id="searchInput" placeholder="Поиск чатов или ввод адреса syph1...">
       </div>
 
-      <!-- Chat list -->
+      <!-- Список чатов -->
       <div class="chat-list" id="chatList">
-        <!-- Rendered dynamically -->
+        <!-- Заполняется динамически -->
       </div>
 
-      <!-- Bottom action bar -->
+      <!-- Кнопка уничтожения данных -->
       <footer class="sidebar-footer">
-        <button class="burn-button" id="btnEmergencyBurn" title="Emergency zero-fill data wipe">
-          🔥 Emergency Burn
+        <button class="burn-button" id="btnEmergencyBurn" title="Экстренное удаление всех ключей и базы">
+          🔥 Экстренное уничтожение (Burn)
         </button>
       </footer>
     </aside>
 
-    <!-- Main Chat View -->
+    <!-- Основное окно чата -->
     <main class="chat-main" id="chatMain">
       <header class="chat-header" id="chatHeader">
         <div class="active-peer-info">
           <div class="avatar peer-avatar" id="activePeerAvatar">B</div>
           <div>
-            <h3 class="active-peer-name" id="activePeerName">Bob (syph1k9...23d)</h3>
+            <h3 class="active-peer-name" id="activePeerName">Боб (syph1bob...449)</h3>
             <div class="active-peer-status" id="activePeerStatus">
-              <span class="dot-online"></span> Double Ratchet Active • 1-hop neighbor
+              <span class="dot-online"></span> Double Ratchet активен • Соседний узел
             </div>
           </div>
         </div>
         <div class="chat-actions">
-          <button class="action-btn" id="btnVerifyKeys" title="Verify Fingerprint & Ratchet Key">🔑 Verify</button>
-          <button class="action-btn" id="btnSelfDestruct" title="Auto-destruct timer">⏱️ 24h</button>
+          <button class="action-btn" id="btnVerifyKeys" title="Сверить криптографический отпечаток">🔑 Сверить ключ</button>
+          <button class="action-btn" id="btnSelfDestruct" title="Таймер самоуничтожения">⏱️ 24ч</button>
         </div>
       </header>
 
-      <!-- Messages container -->
+      <!-- Сообщения -->
       <div class="messages-viewport" id="messagesViewport">
         <div class="encryption-notice">
           <div class="notice-badge">
-            <span>🛡️</span> Messages in this room are end-to-end encrypted via X25519 & ChaCha20-Poly1305.
-            No server or ISP can read the plaintext.
+            <span>🛡️</span> Сообщения в этом чате защищены сквозным шифрованием (X25519 & ChaCha20-Poly1305).
+            Ни серверы, ни провайдеры не имеют доступа к тексту.
           </div>
         </div>
-        <!-- Dynamic message bubbles injected here -->
       </div>
 
-      <!-- Composer Input -->
+      <!-- Поле ввода -->
       <footer class="chat-composer">
         <div class="composer-container">
-          <button class="composer-icon-btn" title="Attach file or encrypted payload">📎</button>
-          <textarea id="messageInput" placeholder="Write an encrypted message..." rows="1"></textarea>
-          <button class="send-button" id="btnSend" title="Send encrypted packet">
+          <button class="composer-icon-btn" title="Прикрепить зашифрованный файл">📎</button>
+          <textarea id="messageInput" placeholder="Написать зашифрованное сообщение..." rows="1"></textarea>
+          <button class="send-button" id="btnSend" title="Отправить пакет в Mesh">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
             </svg>
@@ -104,20 +103,19 @@
     </main>
   </div>
 
-  <!-- Key Verification Modal -->
+  <!-- Модальное окно верификации отпечатка ключа -->
   <div class="modal-overlay hidden" id="verificationModal">
     <div class="modal-content">
       <div class="modal-header">
-        <h3>Cryptographic Fingerprint</h3>
+        <h3>Криптографический отпечаток</h3>
         <button class="close-modal" id="btnCloseModal">✕</button>
       </div>
       <div class="modal-body">
-        <p class="modal-hint">Verify this 64-character SHA-256 fingerprint with your contact out-of-band:</p>
+        <p class="modal-hint">Сверьте этот 64-значный SHA-256 отпечаток с собеседником при встрече или по видео:</p>
         <div class="fingerprint-display" id="modalFingerprint">
           7F2A 9C81 D0E4 11B3 44FE 8812 90AA 3BC7
         </div>
         <div class="qr-placeholder" id="modalQR">
-          <!-- Procedural SVG QR code -->
           <svg width="160" height="160" viewBox="0 0 100 100" class="qr-svg">
             <rect width="100" height="100" fill="#121824"/>
             <rect x="10" y="10" width="25" height="25" fill="#00ffaa"/>
@@ -130,9 +128,9 @@
           </svg>
         </div>
         <div class="modal-stats">
-          <div><span>Protocol:</span> SYPH-v1</div>
-          <div><span>Curve:</span> Ed25519 / X25519</div>
-          <div><span>Cipher:</span> ChaCha20-Poly1305</div>
+          <div><span>Протокол:</span> SYPH-v1</div>
+          <div><span>Кривые:</span> Ed25519 / X25519</div>
+          <div><span>Шифр:</span> ChaCha20-Poly1305</div>
         </div>
       </div>
     </div>

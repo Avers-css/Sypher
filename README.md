@@ -20,7 +20,20 @@
 [![Zero Servers](https://img.shields.io/badge/Hosting%20Cost-%240.00%20(Serverless)-purple?style=for-the-badge)](docs/ARCHITECTURE.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blueviolet?style=for-the-badge)](LICENSE)
 
+[ 🇷🇺 **Документация на русском языке (README.ru.md)** ](README.ru.md) • [ **Download Binaries (.exe, .apk)** ](https://github.com/Avers-css/Sypher/releases)
+
 </div>
+
+---
+
+## 🇷🇺 Краткое описание на русском
+
+**Sypher (Сайфер)** — полностью анонимный P2P-мессенджер со сквозным шифрованием (Double Ratchet) и работой в ячеистых Mesh-сетях.
+- **Работает без интернета:** сообщения могут передаваться локально по Wi-Fi Direct и через прохожих по Bluetooth (BLE).
+- **Без серверов и без номеров телефонов:** 100% анонимность, $0 затрат на хостинг.
+- **Интерфейс уровня Telegram:** аппаратный темный Glassmorphism UI.
+- Полная документация на русском: **[README.ru.md](README.ru.md)**.
+- Готовые сборки для установки (.exe, .apk): вкладка **[Releases](https://github.com/Avers-css/Sypher/releases)**.
 
 ---
 
@@ -48,135 +61,26 @@ It bridges the best of two worlds:
 
 ---
 
-## 📐 Architecture
+## 📦 Where to download binaries (.exe, .apk)?
 
-Sypher adopts the enterprise **Protocol Core + Thin Platform Targets** architecture used by Telegram (`tdlib`), Signal (`libsignal`), and Matrix:
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        SYPHER PROTOCOL ENGINE                          │
-│                                                                        │
-│  - Cryptography Core (X25519, Ed25519, ChaCha20-Poly1305, Ratchet)     │
-│  - SYPH Binary Wire Protocol (Header, Flags, TTL, Anti-Replay)         │
-│  - Mesh Engine (Epidemic Router, LRU Deduplicator, Store-and-Forward)  │
-│  - Local Encrypted Vault (PBKDF2 + AES-256-GCM + Emergency Burn)       │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-               ┌───────────────────┼───────────────────┐
-               ▼                   ▼                   ▼
-    ┌──────────────────────┐ ┌──────────┐ ┌──────────────────────┐
-    │ @sypher/desktop      │ │ @sypher/ │ │ @sypher/android      │
-    │ - Windows (.exe)     │ │   cli    │ │ - Foreground Service │
-    │ - Linux (AppImage)   │ │ - Server │ │ - BLE Mesh Radio     │
-    │ - macOS (.dmg)       │ │   Daemon │ │ - Biometric Auth     │
-    └──────────────────────┘ └──────────┘ └──────────────────────┘
-```
-
-Detailed architectural blueprints and mathematical specifications are documented in:
-* [Architecture Blueprint](docs/ARCHITECTURE.md)
-* [Cryptographic Specification](docs/CRYPTO_SPEC.md)
-* [Wire Protocol (SYPH-v1)](docs/WIRE_PROTOCOL.md)
-* [Threat Model (STRIDE)](docs/THREAT_MODEL.md)
-
----
-
-## 📂 Repository Structure
-
-```
-Sypher/
-├── .github/workflows/          # CI/CD workflows for testing and multi-platform releases
-├── docs/                       # Architecture, Cryptography, Wire Protocol, Threat Model
-├── packages/
-│   ├── core/                   # @sypher/core: Headless cryptographic & mesh routing engine
-│   │   ├── src/
-│   │   │   ├── crypto/         # Keys, X25519, ChaCha20-Poly1305, Double Ratchet, Zeroize
-│   │   │   ├── protocol/       # Binary serializer/deserializer for SYPH packets, BLE framing
-│   │   │   ├── mesh/           # Epidemic router, deduplication cache, store-and-forward pool
-│   │   │   ├── storage/        # Encrypted Vault (PBKDF2 + AES-256-GCM)
-│   │   │   └── transport/      # UDP Multicast & transport abstractions
-│   │   └── tests/              # 14 automated unit & integration tests
-│   ├── desktop/                # @sypher/desktop: Telegram-class desktop client
-│   │   ├── src/main/           # Electron main process, tray, hardware acceleration
-│   │   ├── src/preload/        # Context-isolated security bridge
-│   │   └── src/renderer/       # Glassmorphism UI (HTML5, Modern CSS, ES Modules)
-│   ├── android/                # @sypher/android: Native Android BLE Foreground Service
-│   └── cli/                    # @sypher/cli: Terminal client & headless Linux node runner
-├── package.json                # Root workspace configuration
-├── LICENSE                     # Apache 2.0 License
-└── README.md                   # This documentation
-```
+Compiled release binaries are published in the **[GitHub Releases](https://github.com/Avers-css/Sypher/releases)** tab:
+* **Windows:** `Sypher-Setup-1.0.0.exe` / `Sypher-Portable.exe`
+* **Linux:** `Sypher-1.0.0.AppImage` / `.deb`
+* **macOS:** `Sypher-1.0.0.dmg`
+* **Android:** `Sypher-1.0.0.apk`
 
 ---
 
 ## 🚀 Quickstart & Development
 
-### 1. Requirements
-* **Node.js**: v22.x or v24.x (LTS recommended)
-* **npm**: v10+
-
-### 2. Install & Compile Core
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/Sypher.git
+git clone https://github.com/Avers-css/Sypher.git
 cd Sypher
-
-# Install dependencies across all workspaces
 npm install
-
-# Compile the TypeScript core
 npm run build
-```
-
-### 3. Run Cryptographic & Protocol Tests
-```bash
 npm test
-```
-*Executes all 14 unit and integration tests covering ECDH, Double Ratchet, packet framing, and encrypted vault operations.*
-
-### 4. Launch Desktop Client (Windows, Linux, macOS)
-```bash
 npm run desktop:dev
 ```
-
-### 5. Launch Headless Mesh Daemon (CLI)
-```bash
-npm run cli:start -- daemon
-```
-
----
-
-## 📦 Building Platform Binaries
-
-### Windows (x64 / ARM64)
-```bash
-npm run desktop:build -- --win
-```
-*Generates standalone installer (`.exe`) and portable executable in `packages/desktop/release/`.*
-
-### Linux (AppImage / DEB)
-```bash
-npm run desktop:build -- --linux
-```
-*Generates `.AppImage` and Debian `.deb` packages.*
-
-### macOS (Universal DMG)
-```bash
-npm run desktop:build -- --mac
-```
-*Generates Apple Silicon and Intel `.dmg` disk image.*
-
-### Android (APK)
-```bash
-cd packages/android/android
-./gradlew assembleRelease
-```
-*Generates signed Android APK in `packages/android/android/app/build/outputs/apk/release/`.*
-
----
-
-## 🔒 Security Audit & Responsible Disclosure
-
-Sypher was built strictly under a **Zero-Trust** philosophy. If you discover a cryptographic defect or security vulnerability, please do not file a public GitHub issue. Send an encrypted notification to the security team or open a confidential security advisory on GitHub.
 
 ---
 

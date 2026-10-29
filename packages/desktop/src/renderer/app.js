@@ -1,4 +1,4 @@
-// Sypher Desktop Controller
+// Sypher Desktop Controller (Russian Localization)
 const state = {
   myId: 'syph19k20fae37b981290aa3bc7',
   myFingerprint: '7F2A 9C81 D0E4 11B3 44FE 8812 90AA 3BC7',
@@ -6,24 +6,24 @@ const state = {
   chats: [
     {
       id: 'mesh-broadcast',
-      name: '🌐 Local Mesh Broadcast',
+      name: '🌐 Локальный радиоканал Mesh',
       avatar: 'M',
-      status: 'Ad-Hoc UDP/BLE Network',
-      lastMessage: 'Beacon active: 3 nearby nodes detected',
-      time: 'Just now',
+      status: 'Ad-Hoc UDP/BLE Сеть (Без серверов)',
+      lastMessage: 'Радиомаяк активен: найдено 3 узла поблизости',
+      time: 'Только что',
       unread: 0,
       messages: [
         {
           id: '1',
           sender: 'system',
-          text: 'Joined local mesh frequency (UDP: 239.255.77.88:7788). All packets routed via Epidemic Gossip.',
+          text: 'Подключено к частоте локальной Mesh-сети (UDP: 239.255.77.88:7788). Все пакеты передаются по цепочке через людей.',
           time: '18:30',
           isOutgoing: false,
         },
         {
           id: '2',
           sender: 'syph1bob...449',
-          text: 'Node Bob online. Relay service initialized.',
+          text: 'Узел Bob в сети. Служба ретрансляции активна.',
           time: '18:32',
           isOutgoing: false,
         },
@@ -31,31 +31,31 @@ const state = {
     },
     {
       id: 'bob-direct',
-      name: 'Bob (syph1bob...449)',
-      avatar: 'B',
-      status: 'Double Ratchet Active • 1-hop',
-      lastMessage: 'Verified fingerprint matches!',
+      name: 'Боб (syph1bob...449)',
+      avatar: 'Б',
+      status: 'Double Ratchet Активен • 1-й прыжок',
+      lastMessage: 'Отпечаток ключа проверен, совпадает!',
       time: '18:33',
       unread: 1,
       messages: [
         {
           id: 'm1',
           sender: 'syph1bob...449',
-          text: 'Hey! Are you running the new Sypher build?',
+          text: 'Привет! Ты тестируешь новую версию Sypher?',
           time: '18:31',
           isOutgoing: false,
         },
         {
           id: 'm2',
           sender: 'me',
-          text: 'Yes! Completely decentralized, zero servers, full E2EE.',
+          text: 'Да! Полная децентрализация, ноль серверов, чистое сквозное шифрование E2EE.',
           time: '18:32',
           isOutgoing: true,
         },
         {
           id: 'm3',
           sender: 'syph1bob...449',
-          text: 'Verified fingerprint matches!',
+          text: 'Отпечаток ключа проверен, совпадает!',
           time: '18:33',
           isOutgoing: false,
         },
@@ -111,7 +111,6 @@ function renderActiveChat() {
   `;
 
   const viewport = document.getElementById('messagesViewport');
-  // Retain the top encryption notice
   const notice = viewport.querySelector('.encryption-notice');
   viewport.innerHTML = '';
   if (notice) viewport.appendChild(notice);
@@ -124,7 +123,7 @@ function renderActiveChat() {
       <div class="message-bubble">${escapeHtml(msg.text)}</div>
       <div class="message-info">
         <span>${msg.time}</span>
-        ${msg.isOutgoing ? '<span>✓✓ E2EE</span>' : ''}
+        ${msg.isOutgoing ? '<span>✓✓ E2EE Зашифровано</span>' : ''}
       </div>
     `;
     viewport.appendChild(row);
@@ -190,8 +189,8 @@ function setupEventListeners() {
 
   // Emergency Burn
   document.getElementById('btnEmergencyBurn').addEventListener('click', () => {
-    if (confirm('EMERGENCY BURN: This will immediately overwrite and wipe all encryption keys, session ratchets, and local database with random noise. Are you sure?')) {
-      alert('Vault zeroized and destroyed. Exiting Sypher.');
+    if (confirm('ЭКСТРЕННОЕ УНИЧТОЖЕНИЕ ДАННЫХ: Это действие мгновенно сотрет все ключи шифрования, сессии и базу сообщений, заполнив память и диск случайным шумом. Вы уверены?')) {
+      alert('Все ключи и данные успешно стерты без возможности восстановления. Выход из Sypher.');
       window.close();
     }
   });

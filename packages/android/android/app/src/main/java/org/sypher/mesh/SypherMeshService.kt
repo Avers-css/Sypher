@@ -279,9 +279,10 @@ class SypherMeshService : Service() {
                 .addServiceUuid(pUuid)
                 .build()
 
-            // Secondary Scan Response Data (Under 12 bytes)
+            // Secondary Scan Response Data (Under 16 bytes)
             val scanResponseData = AdvertiseData.Builder()
                 .addServiceData(pUuid, cleanId)
+                .addManufacturerData(0x5950, cleanId)
                 .build()
 
             bleAdvertiser?.stopAdvertising(object : AdvertiseCallback() {})
@@ -298,31 +299,46 @@ class SypherMeshService : Service() {
             Log.w(TAG, "Error starting BLE advertiser: ${t.message}")
         }
 
-        // 2. Start Continuous BLE Scanning
+        // 2. Start Continuous Low-Latency BLE Scanning for Phones and PCs
         try {
             val scanSettings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .setReportDelay(0)
                 .build()
 
             val pUuid = ParcelUuid(SYPHER_SERVICE_UUID)
-            val scanFilter = ScanFilter.Builder()
+            val scanFilterService = ScanFilter.Builder()
                 .setServiceUuid(pUuid)
+                .build()
+            val scanFilterMfg = ScanFilter.Builder()
+                .setManufacturerData(0x5950, null)
                 .build()
 
             bleScanner?.stopScan(object : ScanCallback() {})
-            bleScanner?.startScan(listOf(scanFilter), scanSettings, object : ScanCallback() {
+            bleScanner?.startScan(listOf(scanFilterService, scanFilterMfg), scanSettings, object : ScanCallback() {
                 override fun onScanResult(callbackType: Int, result: ScanResult?) {
                     result ?: return
                     val scanRecord = result.scanRecord ?: return
-                    val serviceData = scanRecord.getServiceData(pUuid)
 
-                    val shortId = if (serviceData != null && serviceData.isNotEmpty()) {
-                        String(serviceData, Charsets.UTF_8)
+                    val mfgData = scanRecord.getManufacturerData(0x5950)
+                    val serviceData = scanRecord.getServiceData(pUuid)
+                    val devName = result.device.name ?: ""
+
+                    val isWin = (mfgData != null && String(mfgData, Charsets.UTF_8).contains("WIN", ignoreCase = true)) ||
+                                devName.contains("Windows", ignoreCase = true) ||
+                                devName.contains("PC", ignoreCase = true)
+
+                    val shortId = if (mfgData != null && mfgData.isNotEmpty()) {
+                        val mfgStr = String(mfgData, Charsets.UTF_8).replace("SYP", "").replace("_WIN", "").trim()
+                        if (mfgStr.isNotEmpty()) mfgStr.take(6) else result.device.address.replace(":", "").takeLast(6).lowercase()
+                    } else if (serviceData != null && serviceData.isNotEmpty()) {
+                        String(serviceData, Charsets.UTF_8).take(6)
                     } else {
                         result.device.address.replace(":", "").takeLast(6).lowercase()
                     }
-                    val peerId = "syp-" + shortId
+
+                    val prefix = if (isWin) "syp-win-" else "syp-"
+                    val peerId = prefix + shortId
 
                     val rssi = result.rssi
                     Log.d(TAG, "Discovered Sypher BLE Peer: $peerId (RSSI: $rssi, MAC: ${result.device.address})")

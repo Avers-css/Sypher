@@ -102,8 +102,8 @@ html, body {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: rgba(0, 240, 255, 0.08);
-  border: 1px solid rgba(0, 240, 255, 0.2);
+  background: #000000;
+  border: 1.5px solid #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;

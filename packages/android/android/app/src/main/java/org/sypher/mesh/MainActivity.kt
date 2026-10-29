@@ -2,12 +2,15 @@ package org.sypher.mesh
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.webkit.JsResult
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -50,6 +53,30 @@ class MainActivity : Activity() {
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         Log.i(TAG, "Sypher UI loaded successfully: $url")
+                    }
+                }
+                webChromeClient = object : WebChromeClient() {
+                    override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                        AlertDialog.Builder(this@MainActivity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                            .setTitle("Sypher")
+                            .setMessage(message)
+                            .setPositiveButton(android.R.string.ok) { _, _ -> result?.confirm() }
+                            .setOnCancelListener { result?.cancel() }
+                            .create()
+                            .show()
+                        return true
+                    }
+
+                    override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                        AlertDialog.Builder(this@MainActivity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                            .setTitle("Sypher")
+                            .setMessage(message)
+                            .setPositiveButton(android.R.string.ok) { _, _ -> result?.confirm() }
+                            .setNegativeButton(android.R.string.cancel) { _, _ -> result?.cancel() }
+                            .setOnCancelListener { result?.cancel() }
+                            .create()
+                            .show()
+                        return true
                     }
                 }
             }
@@ -117,8 +144,16 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (::webView.isInitialized && webView.canGoBack()) {
-            webView.goBack()
+        if (::webView.isInitialized) {
+            webView.evaluateJavascript("(function(){ var l = document.getElementById('appLayout'); if(l && l.classList.contains('mobile-chat-open')) { l.classList.remove('mobile-chat-open'); return 'closed'; } return 'noop'; })()") { result ->
+                if (result == null || !result.contains("closed")) {
+                    if (webView.canGoBack()) {
+                        webView.goBack()
+                    } else {
+                        super.onBackPressed()
+                    }
+                }
+            }
         } else {
             super.onBackPressed()
         }

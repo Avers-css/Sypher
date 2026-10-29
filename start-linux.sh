@@ -23,7 +23,7 @@ if [ ! -d "packages/core/dist" ]; then
 fi
 
 echo "[*] Launching Sypher Desktop UI..."
-npm run desktop:dev 2>/dev/null || (
-    echo "[*] Desktop GUI fallback: Starting Headless Daemon & CLI..."
+node packages/desktop/src/launcher.js || (
+    echo "[*] Fallback: Starting Headless Mesh Daemon & CLI..."
     cd packages/cli && node src/index.js daemon
 )

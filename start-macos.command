@@ -19,4 +19,4 @@ if [ ! -d "packages/core/dist" ]; then
 fi
 
 echo "[*] Launching Sypher on macOS..."
-npm run desktop:dev
+node packages/desktop/src/launcher.js

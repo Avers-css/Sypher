@@ -19,5 +19,6 @@ if exist "Sypher.exe" (
     exit /b
 )
 
-echo [*] Starting via Node/Desktop...
-npm run desktop:dev
+echo [*] Starting via Node.js Desktop Launcher...
+node packages\desktop\src\launcher.js
+pause

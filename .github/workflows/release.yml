@@ -23,67 +23,23 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Build Android APK
         working-directory: packages/android/android
         run: |
-          chmod +x gradlew || gradle wrapper
-          gradle assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/app-debug.apk ../../../release_artifacts/Sypher.apk || cp $(find app/build/outputs/apk/ -name "*.apk" | head -n 1) ../../../release_artifacts/Sypher.apk
+          gradle wrapper --gradle-version 8.2
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          mkdir -p ../../../release_artifacts
+          cp app/build/outputs/apk/debug/*.apk ../../../release_artifacts/Sypher.apk
 
-      - name: Upload APK to Release
+      - name: Upload APK to Release v1.0.0
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: v1.0.0
           files: release_artifacts/Sypher.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-desktop-multiplatform:
-    name: Package Desktop (Windows, Linux, macOS)
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: Sypher-Linux-Portable.tar.gz
-          - os: macos-latest
-            artifact_name: Sypher-macOS-Portable.tar.gz
-          - os: windows-latest
-            artifact_name: Sypher-Windows.zip
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Build Core
-        run: |
-          npm ci || npm install
-          npm run build
-
-      - name: Package Release
-        shell: bash
-        run: |
-          mkdir -p dist_release
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            powershell -Command "Compress-Archive -Path 'packages', 'docs', 'README.md', 'README.ru.md', 'LICENSE' -DestinationPath 'dist_release/Sypher-Windows.zip' -Force"
-          elif [ "${{ runner.os }}" == "macOS" ]; then
-            tar -czvf dist_release/Sypher-macOS-Portable.tar.gz packages docs README.md README.ru.md LICENSE
-          else
-            tar -czvf dist_release/Sypher-Linux-Portable.tar.gz packages docs README.md README.ru.md LICENSE
-          fi
-
-      - name: Upload Asset to Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: dist_release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

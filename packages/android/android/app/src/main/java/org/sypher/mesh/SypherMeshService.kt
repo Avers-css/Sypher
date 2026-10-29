@@ -58,6 +58,7 @@ class SypherMeshService : Service() {
 
     // Outgoing queue per device: MAC -> Queue<ByteArray>
     private val outgoingQueues = ConcurrentHashMap<String, ConcurrentLinkedQueue<ByteArray>>()
+    private val activeGattClients = ConcurrentHashMap<String, BluetoothGatt>()
 
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -299,10 +300,10 @@ class SypherMeshService : Service() {
             Log.w(TAG, "Error starting BLE advertiser: ${t.message}")
         }
 
-        // 2. Start Continuous Low-Latency BLE Scanning for Phones and PCs
+        // 2. Start Continuous Balanced BLE Scanning for Phones and PCs
         try {
             val scanSettings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
                 .setReportDelay(0)
                 .build()
 
@@ -324,20 +325,29 @@ class SypherMeshService : Service() {
                     val serviceData = scanRecord.getServiceData(pUuid)
                     val devName = result.device.name ?: ""
 
-                    val isWin = (mfgData != null && String(mfgData, Charsets.UTF_8).contains("WIN", ignoreCase = true)) ||
+                    val mfgStr = if (mfgData != null) String(mfgData, Charsets.UTF_8) else ""
+                    val isWin = mfgStr.contains("WIN", ignoreCase = true) ||
                                 devName.contains("Windows", ignoreCase = true) ||
                                 devName.contains("PC", ignoreCase = true)
+                    val isLin = mfgStr.contains("LIN", ignoreCase = true) || devName.contains("Linux", ignoreCase = true)
+                    val isMac = mfgStr.contains("MAC", ignoreCase = true) || devName.contains("Mac", ignoreCase = true)
+
+                    val prefix = when {
+                        isWin -> "syp-win-"
+                        isLin -> "syp-lin-"
+                        isMac -> "syp-mac-"
+                        else -> "syp-droid-"
+                    }
 
                     val shortId = if (mfgData != null && mfgData.isNotEmpty()) {
-                        val mfgStr = String(mfgData, Charsets.UTF_8).replace("SYP", "").replace("_WIN", "").trim()
-                        if (mfgStr.isNotEmpty()) mfgStr.take(6) else result.device.address.replace(":", "").takeLast(6).lowercase()
+                        val clean = mfgStr.replace("SYP", "").replace("_WIN", "").replace("_LIN", "").replace("_MAC", "").trim()
+                        if (clean.isNotEmpty()) clean.take(6) else result.device.address.replace(":", "").takeLast(6).lowercase()
                     } else if (serviceData != null && serviceData.isNotEmpty()) {
                         String(serviceData, Charsets.UTF_8).take(6)
                     } else {
                         result.device.address.replace(":", "").takeLast(6).lowercase()
                     }
 
-                    val prefix = if (isWin) "syp-win-" else "syp-"
                     val peerId = prefix + shortId
 
                     val rssi = result.rssi
@@ -362,6 +372,9 @@ class SypherMeshService : Service() {
         try {
             bleAdvertiser?.stopAdvertising(object : AdvertiseCallback() {})
             bleScanner?.stopScan(object : ScanCallback() {})
+            activeGattClients.values.forEach { try { it.disconnect(); it.close() } catch (e: Exception) {} }
+            activeGattClients.clear()
+            outgoingQueues.clear()
         } catch (e: Exception) {}
     }
 
@@ -381,7 +394,7 @@ class SypherMeshService : Service() {
             val packetBytes = jsonPacket.toByteArray(Charsets.UTF_8)
 
             // Split into chunks if exceeds 480 bytes
-            val queue = ConcurrentLinkedQueue<ByteArray>()
+            val queue = outgoingQueues.getOrPut(macAddress) { ConcurrentLinkedQueue<ByteArray>() }
             val maxChunk = 480
             if (packetBytes.size <= maxChunk) {
                 queue.add(packetBytes)
@@ -395,7 +408,11 @@ class SypherMeshService : Service() {
                     queue.add(header.toByteArray(Charsets.UTF_8))
                 }
             }
-            outgoingQueues[macAddress] = queue
+
+            if (activeGattClients.containsKey(macAddress)) {
+                Log.d(TAG, "GATT connection already in progress for $macAddress. Chunks queued.")
+                return
+            }
 
             val gattCallback = object : BluetoothGattCallback() {
                 private var currentMtu = 23
@@ -403,6 +420,7 @@ class SypherMeshService : Service() {
                 override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
                         Log.d(TAG, "Connected to BLE peer $macAddress via TRANSPORT_LE. Requesting MTU 512...")
+                        if (gatt != null) activeGattClients[macAddress] = gatt
                         try {
                             gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                             val requested = gatt?.requestMtu(512) ?: false
@@ -415,6 +433,7 @@ class SypherMeshService : Service() {
                     } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                         Log.d(TAG, "Disconnected from BLE peer $macAddress")
                         outgoingQueues.remove(macAddress)
+                        activeGattClients.remove(macAddress)
                         try { gatt?.close() } catch (e: Exception) {}
                     }
                 }
@@ -469,10 +488,13 @@ class SypherMeshService : Service() {
             }
 
             // Explicitly use TRANSPORT_LE to avoid BR/EDR pairing requirement!
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 device.connectGatt(this, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
             } else {
                 device.connectGatt(this, false, gattCallback)
+            }
+            if (gatt != null) {
+                activeGattClients[macAddress] = gatt
             }
 
         } catch (t: Throwable) {

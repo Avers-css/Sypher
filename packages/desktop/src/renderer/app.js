@@ -257,6 +257,14 @@
           ? '<span class="unread-badge">' + chat.unread + '</span>'
           : '';
 
+      var chatMeta = getPeerMetadata({ id: chat.id, name: chat.name });
+      var tagHtml = '';
+      if (chat.id === 'mesh-broadcast') {
+        tagHtml = '<span class="platform-pill" style="margin-left:6px; font-size:8px;">ЭФИР</span>';
+      } else {
+        tagHtml = '<span class="platform-pill ' + chatMeta.badgeClass + '" style="margin-left:6px; font-size:8px;">' + chatMeta.badgeText + '</span>';
+      }
+
       item.innerHTML =
         '<div class="avatar" style="' +
         avatarStyle +
@@ -267,6 +275,7 @@
         '<div class="chat-item-top">' +
         '<span class="chat-item-name">' +
         escapeHtml(chat.name) +
+        tagHtml +
         '</span>' +
         '<span class="chat-item-time">' +
         escapeHtml(chat.time) +
@@ -427,6 +436,63 @@
   // ====================================================
   // РАДАР УСТРОЙСТВ ПОБЛИЗОСТИ (BLE ПРОХОЖИЕ И WI-FI)
   // ====================================================
+  function getPeerMetadata(peer) {
+    var id = (peer.id || '').toLowerCase();
+    var name = (peer.name && peer.name !== peer.id) ? peer.name : '';
+    var platform = 'Узел Mesh';
+    var badgeClass = 'pill-mesh';
+    var badgeText = 'MESH';
+    var iconLetter = 'S';
+
+    if (id.indexOf('syp-win-') !== -1 || name.toLowerCase().indexOf('windows') !== -1 || name.toLowerCase().indexOf('pc') !== -1) {
+      platform = 'Компьютер Windows';
+      badgeClass = 'pill-win';
+      badgeText = 'WIN';
+      iconLetter = 'W';
+    } else if (id.indexOf('syp-droid-') !== -1 || name.toLowerCase().indexOf('android') !== -1) {
+      platform = 'Телефон Android';
+      badgeClass = 'pill-droid';
+      badgeText = 'ANDROID';
+      iconLetter = 'A';
+    } else if (id.indexOf('syp-lin-') !== -1 || name.toLowerCase().indexOf('linux') !== -1) {
+      platform = 'Компьютер Linux';
+      badgeClass = 'pill-linux';
+      badgeText = 'LINUX';
+      iconLetter = 'L';
+    } else if (id.indexOf('syp-mac-') !== -1 || name.toLowerCase().indexOf('mac') !== -1) {
+      platform = 'Компьютер Mac';
+      badgeClass = 'pill-apple';
+      badgeText = 'MAC';
+      iconLetter = 'M';
+    } else if (id.indexOf('syp-ios-') !== -1 || name.toLowerCase().indexOf('iphone') !== -1) {
+      platform = 'Apple iPhone';
+      badgeClass = 'pill-apple';
+      badgeText = 'IOS';
+      iconLetter = 'i';
+    }
+
+    var shortCode = id.replace(/syp-(win-|droid-|lin-|mac-|ios-|node-)?/g, '').toUpperCase();
+    if (shortCode.length > 4) shortCode = shortCode.slice(-4);
+    var title = name || (platform + ' #' + (shortCode || 'PEER'));
+
+    return {
+      title: title,
+      platform: platform,
+      badgeClass: badgeClass,
+      badgeText: badgeText,
+      iconLetter: iconLetter,
+    };
+  }
+
+  var renderNearbyTimer = null;
+  function scheduleRenderNearbyPeers() {
+    if (renderNearbyTimer) return;
+    renderNearbyTimer = setTimeout(function () {
+      renderNearbyTimer = null;
+      renderNearbyPeers();
+    }, 350);
+  }
+
   function renderNearbyPeers() {
     var list = document.getElementById('nearbyPeerList');
     var badge = document.getElementById('peerCounterBadge');
@@ -467,44 +533,45 @@
       var row = document.createElement('div');
       row.className = 'nearby-peer-row';
 
+      var meta = getPeerMetadata(peer);
       var grad = getAvatarColor(peer.id);
       var avatarStyle = 'background: linear-gradient(135deg, ' + grad[0] + ', ' + grad[1] + ')';
 
       var metaText = '';
       if (peer.transport === 'BLE') {
-        metaText = 'BLE Mesh ~' + (peer.distance || '1.5') + 'м (' + (peer.rssi || '-60') + ' dBm)';
+        metaText = 'BLE ~' + (peer.distance || '1.5') + 'м (' + (peer.rssi || '-60') + ' dBm)';
       } else {
-        metaText = 'Wi-Fi LAN: ' + (peer.ip || 'локально');
+        metaText = 'Wi-Fi: ' + (peer.ip || 'локально');
       }
 
       row.innerHTML =
         '<div class="peer-row-left">' +
-        '<div class="nearby-avatar" style="' +
-        avatarStyle +
-        '">' +
-        escapeHtml((peer.name || 'P').charAt(0).toUpperCase()) +
+        '<div class="nearby-avatar" style="' + avatarStyle + '">' +
+        escapeHtml(meta.iconLetter) +
         '</div>' +
         '<div class="nearby-info">' +
-        '<span class="nearby-id">' +
-        escapeHtml(peer.id) +
-        '</span>' +
-        '<span class="nearby-meta">' +
-        escapeHtml(metaText) +
-        '</span>' +
+        '<div class="nearby-title-row">' +
+        '<span class="nearby-name">' + escapeHtml(meta.title) + '</span>' +
+        '<span class="platform-pill ' + meta.badgeClass + '">' + escapeHtml(meta.badgeText) + '</span>' +
+        '</div>' +
+        '<div class="nearby-meta-row">' +
+        '<span class="nearby-id">' + escapeHtml(peer.id) + '</span> • ' +
+        '<span class="nearby-meta">' + escapeHtml(metaText) + '</span>' +
         '</div>' +
         '</div>' +
-        '<button class="peer-action-btn">Написать</button>';
+        '</div>' +
+        '<button class="peer-action-btn" title="Открыть личный диалог с этим устройством">Написать</button>';
 
       var writeBtn = row.querySelector('.peer-action-btn');
       if (writeBtn) {
         writeBtn.onclick = function (e) {
           e.stopPropagation();
-          startDirectChatWithPeer(peer.id, peer.name);
+          startDirectChatWithPeer(peer.id, meta.title);
         };
       }
 
       row.onclick = function () {
-        startDirectChatWithPeer(peer.id, peer.name);
+        startDirectChatWithPeer(peer.id, meta.title);
       };
 
       list.appendChild(row);
@@ -515,11 +582,12 @@
         quickItem.className = 'nearby-peer-row';
         quickItem.style.cursor = 'pointer';
         quickItem.innerHTML =
-          '<span style="font-family:var(--font-mono); font-size:12px; color:var(--accent-cyan)">' +
-          escapeHtml(peer.id) +
-          '</span><span style="font-size:11px; color:var(--text-muted)">' +
-          escapeHtml(metaText) +
-          '</span>';
+          '<div style="display:flex; justify-content:space-between; align-items:center; width:100%">' +
+          '<span style="font-family:var(--font-mono); font-size:12px; color:var(--text-primary)">' +
+          escapeHtml(meta.title) +
+          '</span><span class="platform-pill ' + meta.badgeClass + '">' +
+          escapeHtml(meta.badgeText) +
+          '</span></div>';
         quickItem.onclick = function () {
           var input = document.getElementById('newChatPeerIdInput');
           if (input) input.value = peer.id;
@@ -536,18 +604,33 @@
       return c.id === peerId;
     });
 
+    var meta = getPeerMetadata({ id: peerId, name: peerName });
+
     if (!existing) {
       var newChat = {
         id: peerId,
-        name: peerName || peerId,
-        avatar: (peerName || peerId).replace('syp-', '').charAt(0).toUpperCase(),
-        status: 'Прямой зашифрованный канал',
-        lastMessage: 'Диалог открыт',
+        name: meta.title,
+        avatar: meta.iconLetter,
+        status: 'Личный диалог E2EE • Только вы двое',
+        lastMessage: 'Прямой зашифрованный канал открыт',
         time: formatTime(new Date()),
         unread: 0,
-        messages: [],
+        messages: [
+          {
+            id: 'info_' + Date.now(),
+            sender: 'system',
+            authorName: 'СИСТЕМА',
+            type: 'text',
+            text: 'Открыт личный диалог с ' + meta.title + ' (' + peerId + '). Сообщения шифруются сквозным ключом X25519 & ChaCha20-Poly1305 и видны ТОЛЬКО вам двоим.',
+            time: formatTime(new Date()),
+            isOutgoing: false,
+          },
+        ],
       };
       state.chats.push(newChat);
+      saveChats();
+    } else if (peerName && existing.name === existing.id) {
+      existing.name = meta.title;
       saveChats();
     }
 
@@ -599,18 +682,18 @@
   };
 
   // Точка входа для обнаружения прохожих по BLE из нативного сервиса
-  window.onBlePeerDiscovered = function (peerId, rssi, distance, mac) {
+  window.onBlePeerDiscovered = function (peerId, rssi, distance, mac, name) {
     if (!peerId || peerId === state.identity.myId) return;
     state.discoveredPeers[peerId] = {
       id: peerId,
-      name: peerId,
+      name: name || peerId,
       transport: 'BLE',
       rssi: rssi,
       distance: distance,
       mac: mac,
       lastSeen: Date.now(),
     };
-    renderNearbyPeers();
+    scheduleRenderNearbyPeers();
   };
 
   // Точка входа входящих пакетов (UDP, HTTP, BLE GATT)
@@ -625,7 +708,7 @@
     }
 
     if (packet && packet.type === 'BLE_PEER_DISCOVERED') {
-      window.onBlePeerDiscovered(packet.peerId, packet.rssi, packet.distance, packet.mac);
+      window.onBlePeerDiscovered(packet.peerId, packet.rssi, packet.distance, packet.mac, packet.name);
       return;
     }
 
@@ -696,7 +779,7 @@
       ip: packet.senderIp || '',
       lastSeen: Date.now(),
     };
-    renderNearbyPeers();
+    scheduleRenderNearbyPeers();
 
     // 1. Обработка подтверждения доставки (ACK)
     if (packet.type === 'SYPH_ACK' && packet.targetMsgId) {

@@ -20,6 +20,8 @@ import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -55,6 +57,9 @@ class MainActivity : Activity() {
 
     // Discovered BLE peer MAC mapping: peerId -> macAddress
     private val blePeerMap = ConcurrentHashMap<String, String>()
+    private val lastNotifyTimes = ConcurrentHashMap<String, Long>()
+    private val isDrainingSneakernet = AtomicBoolean(false)
+    private val sneakernetExecutor = Executors.newSingleThreadExecutor()
 
     // Sneakernet store-and-forward queue for passing offline devices
     private val pendingSneakernetPackets = java.util.concurrent.ConcurrentLinkedQueue<String>()
@@ -72,6 +77,7 @@ class MainActivity : Activity() {
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
+                    databaseEnabled = true
                     allowFileAccess = true
                     allowContentAccess = true
                     cacheMode = WebSettings.LOAD_DEFAULT
@@ -381,22 +387,34 @@ class MainActivity : Activity() {
 
     fun notifyBlePeerDiscovered(peerId: String, rssi: Int, mac: String) {
         blePeerMap[peerId] = mac
-        // Approximate distance based on Free Space Path Loss model
-        val distance = Math.round(Math.pow(10.0, (-59.0 - rssi) / 20.0) * 10.0) / 10.0
+        val now = System.currentTimeMillis()
+        val lastTime = lastNotifyTimes[peerId] ?: 0L
 
-        runOnUiThread {
-            if (::webView.isInitialized) {
-                webView.evaluateJavascript("if(window.onBlePeerDiscovered) window.onBlePeerDiscovered('$peerId', $rssi, $distance, '$mac');", null)
+        // Debounce: update UI at most once every 2.5s per peer to prevent lag and frame drops
+        if (now - lastTime >= 2500L) {
+            lastNotifyTimes[peerId] = now
+            val distance = Math.round(Math.pow(10.0, (-59.0 - rssi) / 20.0) * 10.0) / 10.0
+            runOnUiThread {
+                if (::webView.isInitialized) {
+                    webView.evaluateJavascript("if(window.onBlePeerDiscovered) window.onBlePeerDiscovered('$peerId', $rssi, $distance, '$mac');", null)
+                }
             }
         }
 
-        // Automatic sneakernet relay: transmit all pending packets to discovered peer
-        thread(name = "SypherSneakernetDrain", isDaemon = true) {
-            for (queuedPacket in pendingSneakernetPackets) {
+        // Automatic sneakernet relay: transmit all pending packets using dedicated single-thread worker
+        if (pendingSneakernetPackets.isNotEmpty() && isDrainingSneakernet.compareAndSet(false, true)) {
+            sneakernetExecutor.execute {
                 try {
-                    SypherMeshService.instance?.sendBlePacket(mac, queuedPacket)
-                    Thread.sleep(180)
-                } catch (e: Exception) {}
+                    while (pendingSneakernetPackets.isNotEmpty()) {
+                        val queuedPacket = pendingSneakernetPackets.poll() ?: break
+                        SypherMeshService.instance?.sendBlePacket(mac, queuedPacket)
+                        Thread.sleep(300)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Sneakernet drain notice: ${e.message}")
+                } finally {
+                    isDrainingSneakernet.set(false)
+                }
             }
         }
     }
@@ -487,6 +505,7 @@ class MainActivity : Activity() {
         super.onDestroy()
         instance = null
         isMeshRunning = false
+        try { sneakernetExecutor.shutdownNow() } catch (e: Exception) {}
         try { multicastSocket?.close() } catch (e: Exception) {}
         try { httpServerSocket?.close() } catch (e: Exception) {}
         try { if (multicastLock?.isHeld == true) multicastLock?.release() } catch (e: Exception) {}

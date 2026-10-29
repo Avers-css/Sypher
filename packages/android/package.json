@@ -1,0 +1,14 @@
+{
+  "name": "@sypher/android",
+  "version": "1.0.0",
+  "description": "Sypher Android Mesh & BLE Radio Native Platform Wrapper",
+  "scripts": {
+    "build:apk": "cd android && gradlew assembleRelease",
+    "build:debug": "cd android && gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@sypher/core": "*"
+  },
+  "author": "Sypher Team",
+  "license": "Apache-2.0"
+}

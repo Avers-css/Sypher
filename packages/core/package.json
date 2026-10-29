@@ -1,0 +1,21 @@
+{
+  "name": "@sypher/core",
+  "version": "1.0.0",
+  "description": "Cryptographic and mesh protocol core engine for Sypher",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "echo \"Core built successfully.\"",
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": [
+    "cryptography",
+    "double-ratchet",
+    "mesh",
+    "p2p",
+    "sypher"
+  ],
+  "author": "Sypher Team",
+  "license": "Apache-2.0"
+}

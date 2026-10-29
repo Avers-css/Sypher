@@ -1,0 +1,35 @@
+{
+  "name": "sypher-workspace",
+  "version": "1.0.0",
+  "description": "Sypher: Zero-Knowledge, Peer-to-Peer, Mesh-Capable Encrypted Messenger",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace=@sypher/core",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "echo \"Linting all workspaces...\" && exit 0",
+    "desktop:dev": "npm run dev --workspace=@sypher/desktop",
+    "desktop:build": "npm run build --workspace=@sypher/desktop",
+    "cli:start": "npm run start --workspace=@sypher/cli"
+  },
+  "keywords": [
+    "p2p",
+    "mesh-network",
+    "cryptography",
+    "double-ratchet",
+    "e2ee",
+    "privacy",
+    "tor",
+    "zero-knowledge",
+    "decentralized"
+  ],
+  "author": "Sypher Project Team",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@sypher/desktop",
+  "version": "1.0.0",
+  "description": "Sypher Desktop: Zero-Knowledge P2P Mesh Encrypted Messenger for Windows, Linux & macOS",
+  "main": "src/main/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build:mac": "electron-builder --mac"
+  },
+  "dependencies": {
+    "@sypher/core": "*"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "author": "Sypher Team",
+  "license": "Apache-2.0"
+}

@@ -27,6 +27,7 @@ const BROADCAST_ADDR = '255.255.255.255';
 const MULTICAST_PORT = 7788;
 
 const sseClients = new Set();
+const knownPeers = new Set();
 let udpSocket = null;
 
 const MIME_TYPES = {
@@ -51,6 +52,24 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
+function getBroadcastAddresses() {
+  const addresses = new Set([BROADCAST_ADDR]);
+  try {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const iface of ifaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          const ipParts = iface.address.split('.').map(Number);
+          const maskParts = (iface.netmask || '255.255.255.0').split('.').map(Number);
+          const bcastParts = ipParts.map((b, i) => (b | (~maskParts[i] & 255)));
+          addresses.add(bcastParts.join('.'));
+        }
+      }
+    }
+  } catch {}
+  return Array.from(addresses);
+}
+
 function initUdpMulticast() {
   try {
     const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -59,8 +78,12 @@ function initUdpMulticast() {
       console.warn('[UDP Multicast] Socket notice:', err.message);
     });
 
-    socket.on('message', (msg) => {
+    socket.on('message', (msg, rinfo) => {
       const raw = msg.toString('utf8');
+      if (rinfo && rinfo.address && rinfo.address !== '127.0.0.1' && rinfo.address !== getLocalIp()) {
+        knownPeers.add(rinfo.address);
+      }
+
       for (const client of sseClients) {
         try {
           client.write(`data: ${raw}\n\n`);
@@ -96,10 +119,44 @@ function broadcastUdp(rawString) {
   const buffer = Buffer.from(rawString, 'utf8');
 
   // 1. Multicast send
-  udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, MULTICAST_ADDR, () => {});
+  try {
+    udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, MULTICAST_ADDR, () => {});
+  } catch {}
 
-  // 2. Subnet Broadcast send (bypasses router multicast filters)
-  udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, BROADCAST_ADDR, () => {});
+  // 2. Subnet Broadcast send across all active network adapters
+  const bcasts = getBroadcastAddresses();
+  for (const baddr of bcasts) {
+    try {
+      udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, baddr, () => {});
+    } catch {}
+  }
+
+  // 3. Direct Unicast UDP to known peer IPs
+  for (const peerIp of knownPeers) {
+    try {
+      udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, peerIp, () => {});
+    } catch {}
+
+    // 4. HTTP POST TCP Fallback directly to peer (Android 7789 or Desktop 7788)
+    try {
+      [7789, 7788].forEach((port) => {
+        const req = http.request({
+          hostname: peerIp,
+          port: port,
+          path: '/api/mesh/send',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': buffer.length,
+          },
+          timeout: 1000,
+        }, () => {});
+        req.on('error', () => {});
+        req.write(buffer);
+        req.end();
+      });
+    } catch {}
+  }
 }
 
 function findAvailablePort(startPort, maxAttempts = 20) {

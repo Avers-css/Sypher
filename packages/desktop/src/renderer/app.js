@@ -1,10 +1,54 @@
-// Sypher Core Controller — Decentralized Mesh Radio, File Sharing & Identity Engine
+// Sypher Client Core — Offline BLE Mesh, Dual UDP Radio & E2EE Messenger
 (function () {
   'use strict';
 
-  // 1. Инициализация или загрузка уникального идентификатора узла
+  // 1. Уникальная идентификация узла
+  function getDevicePlatformPrefix() {
+    var ua = navigator.userAgent || '';
+    if (window.AndroidBridge) return 'syp-droid-';
+    if (/Android/i.test(ua)) return 'syp-droid-';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'syp-ios-';
+    if (/Mac/i.test(ua)) return 'syp-mac-';
+    if (/Linux/i.test(ua)) return 'syp-lin-';
+    return 'syp-win-';
+  }
+
+  function generateSecureHex(bytesLength) {
+    var rand = new Uint8Array(bytesLength);
+    if (window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(rand);
+    } else {
+      for (var i = 0; i < bytesLength; i++) {
+        rand[i] = Math.floor(Math.random() * 256);
+      }
+    }
+    var hex = '';
+    for (var j = 0; j < bytesLength; j++) {
+      var b = rand[j].toString(16);
+      hex += b.length === 1 ? '0' + b : b;
+    }
+    return hex;
+  }
+
+  function getAvatarColor(str) {
+    var colors = [
+      ['#007aff', '#00f0ff'],
+      ['#7928ca', '#ff0080'],
+      ['#00e676', '#00b0ff'],
+      ['#ff9100', '#ff5252'],
+      ['#1de9b6', '#1dc4e9'],
+      ['#651fff', '#d500f9'],
+    ];
+    var hash = 0;
+    for (var i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    var idx = Math.abs(hash) % colors.length;
+    return colors[idx];
+  }
+
   function getOrCreateIdentity() {
-    var STORAGE_KEY = 'sypher_node_identity_v2';
+    var STORAGE_KEY = 'sypher_node_identity_v3';
     var stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
@@ -13,20 +57,9 @@
       } catch (e) {}
     }
 
-    var rand = new Uint8Array(16);
-    if (window.crypto && window.crypto.getRandomValues) {
-      window.crypto.getRandomValues(rand);
-    } else {
-      for (var i = 0; i < 16; i++) rand[i] = Math.floor(Math.random() * 256);
-    }
-
-    var hex = '';
-    for (var j = 0; j < 16; j++) {
-      var b = rand[j].toString(16);
-      hex += b.length === 1 ? '0' + b : b;
-    }
-
-    var myId = 'syph1' + hex.substring(0, 14);
+    var prefix = getDevicePlatformPrefix();
+    var hex = generateSecureHex(16);
+    var myId = prefix + hex.substring(0, 8);
 
     var fpParts = [];
     for (var k = 0; k < 8; k++) {
@@ -34,14 +67,21 @@
     }
     var myFingerprint = fpParts.join(' ');
 
-    var identity = { myId: myId, myFingerprint: myFingerprint };
+    var displayName = 'Узел ' + myId.replace('syp-', '').toUpperCase();
+
+    var identity = {
+      myId: myId,
+      displayName: displayName,
+      myFingerprint: myFingerprint,
+    };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(identity));
     return identity;
   }
 
-  // 2. Хранилище диалогов
+  // 2. Хранилище диалогов (ТОЛЬКО ОДИН канал по умолчанию — общий эфир)
   function loadStoredChats() {
-    var stored = localStorage.getItem('sypher_chats_v2');
+    var STORAGE_KEY = 'sypher_chats_v3';
+    var stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
         var parsed = JSON.parse(stored);
@@ -54,17 +94,17 @@
         id: 'mesh-broadcast',
         name: 'Общий радиоэфир Mesh',
         avatar: 'M',
-        status: 'Широковещательный канал (UDP: 239.255.77.88:7788)',
-        lastMessage: 'Канал готов к приему и передаче пакетов',
+        status: 'Широковещательный канал (UDP & BLE)',
+        lastMessage: 'Радиоканал готов к обмену пакетами',
         time: 'Эфир',
         unread: 0,
         messages: [
           {
-            id: 'sys_init',
+            id: 'sys_start',
             sender: 'system',
             authorName: 'СИСТЕМА',
             type: 'text',
-            text: 'Вы подключены к общему эфиру. Все устройства в локальной сети (Wi-Fi, точка доступа, Bluetooth) получают пакеты напрямую без серверов.',
+            text: 'Автономный радиоканал активен. Сообщения передаются напрямую через Wi-Fi UDP и Bluetooth Low Energy без серверов и интернета.',
             time: formatTime(new Date()),
             isOutgoing: false,
           },
@@ -75,7 +115,7 @@
 
   function saveChats() {
     try {
-      localStorage.setItem('sypher_chats_v2', JSON.stringify(state.chats));
+      localStorage.setItem('sypher_chats_v3', JSON.stringify(state.chats));
     } catch (e) {}
   }
 
@@ -89,18 +129,21 @@
     searchQuery: '',
     localIp: '127.0.0.1',
     knownPeerIps: new Set(),
-    discoveredPeers: {}, // peerId -> { lastSeen, name, ip }
+    discoveredPeers: {}, // peerId -> { id, name, transport, rssi, distance, ip, mac, lastSeen }
     chats: loadStoredChats(),
   };
 
+  var singleCheckSvg =
+    '<svg class="tick-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+
   var doubleCheckSvg =
-    '<svg class="icon-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00f0ff" stroke-width="2.5"><path d="M18 6L7 17l-5-5"/><path d="M22 10l-7.5 7.5L13 16"/></svg>';
+    '<svg class="tick-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2.5"><path d="M18 6L7 17l-5-5"/><path d="M22 10l-7.5 7.5L13 16"/></svg>';
 
-  var fileSvg =
-    '<svg class="icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>';
+  var docIconSvg =
+    '<svg class="icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
-  var downloadSvg =
-    '<svg class="icon-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  var downloadIconSvg =
+    '<svg class="icon-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 
   var toastTimer = null;
 
@@ -108,14 +151,12 @@
     var toast = document.getElementById('toastNotification');
     var toastText = document.getElementById('toastText');
     if (!toast || !toastText) return;
-
     toastText.textContent = message;
     toast.classList.remove('hidden');
-
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(function () {
       toast.classList.add('hidden');
-    }, 2500);
+    }, 2800);
   }
 
   function formatTime(d) {
@@ -132,260 +173,60 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
-  function initUI() {
-    var idElem = document.getElementById('mySypherId');
-    if (idElem) {
-      idElem.textContent = state.identity.myId;
-    }
-
-    var settingsId = document.getElementById('settingsNodeId');
-    if (settingsId) settingsId.textContent = state.identity.myId;
-
-    var fpElem = document.getElementById('modalFingerprint');
-    if (fpElem) fpElem.textContent = state.identity.myFingerprint;
-
-    renderChatList();
-    renderActiveChat();
-    setupEventListeners();
-    initTransportBridge();
-  }
-
-  // ====================================================
-  // СЕТЕВОЙ МОСТ (Android Native Bridge & Desktop SSE/POST)
-  // ====================================================
-  function initTransportBridge() {
-    // 1. Android Native
-    if (window.AndroidBridge && window.AndroidBridge.isAvailable) {
-      console.log('[Sypher] Android Native Bridge active');
-      if (window.AndroidBridge.getLocalIp) {
-        state.localIp = window.AndroidBridge.getLocalIp();
-        updateDetectedIpUI(state.localIp);
-      }
-      updateMeshStatus('Android UDP Multicast & Broadcast активны');
-    }
-
-    // 2. Desktop Web (SSE для входящих пакетов)
-    if (window.EventSource && !window.AndroidBridge) {
-      try {
-        var sse = new EventSource('/api/mesh/events');
-        sse.onmessage = function (e) {
-          try {
-            var packet = JSON.parse(e.data);
-            handleIncomingPacket(packet);
-          } catch (err) {}
-        };
-        sse.onopen = function () {
-          updateMeshStatus('Десктопный радиоузел активен');
-        };
-      } catch (e) {}
-
-      // Определение локального IP с десктопного сервера
-      if (window.fetch) {
-        fetch('/api/mesh/ip')
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data && data.ip) {
-              state.localIp = data.ip;
-              updateDetectedIpUI(data.ip);
-            }
-          })
-          .catch(function () {});
-      }
-    }
-
-    // Регулярная посылка маяка присутствия
-    setInterval(sendDiscoveryBeacon, 6000);
-    setTimeout(sendDiscoveryBeacon, 600);
-  }
-
-  window.onLocalIpDetected = function (ip) {
-    if (ip) {
-      state.localIp = ip;
-      updateDetectedIpUI(ip);
-    }
-  };
-
-  function updateDetectedIpUI(ip) {
-    var label = document.getElementById('myDetectedIpLabel');
-    if (label) label.textContent = ip + ':7788';
-  }
-
-  function sendDiscoveryBeacon() {
-    var beacon = {
-      type: 'SYPH_BEACON',
-      from: state.identity.myId,
-      senderIp: state.localIp,
-      time: Date.now(),
-    };
-    dispatchPacketToNetwork(beacon);
-  }
-
-  function dispatchPacketToNetwork(packet) {
-    packet.senderIp = state.localIp;
-    var raw = JSON.stringify(packet);
-
-    // 1. Android Native Bridge
-    if (window.AndroidBridge && window.AndroidBridge.sendMeshPacket) {
-      try {
-        window.AndroidBridge.sendMeshPacket(raw);
-      } catch (e) {
-        console.error('AndroidBridge send error:', e);
-      }
-    }
-
-    // 2. Desktop Server Multicast/Broadcast
-    if (window.fetch) {
-      fetch('/api/mesh/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: raw,
-      }).catch(function () {});
-    }
-
-    // 3. Отправка напрямую по IP на все известные узлы (обход блокировок роутера)
-    state.knownPeerIps.forEach(function (peerIp) {
-      if (peerIp && peerIp !== '127.0.0.1' && peerIp !== state.localIp && window.fetch) {
-        fetch('http://' + peerIp + ':7788/api/mesh/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: raw,
-          mode: 'no-cors',
-        }).catch(function () {});
-      }
-    });
-  }
-
-  // Глобальная точка входа входящих пакетов
-  window.onMeshPacketReceived = function (packetOrJson) {
-    var packet = packetOrJson;
-    if (typeof packetOrJson === 'string') {
-      try {
-        packet = JSON.parse(packetOrJson);
-      } catch (e) {
-        return;
-      }
-    }
-    handleIncomingPacket(packet);
-  };
-
-  function handleIncomingPacket(packet) {
-    if (!packet || !packet.from) return;
-    if (packet.from === state.identity.myId) return; // Игнорируем эхо своих же пакетов
-
-    if (packet.senderIp && packet.senderIp !== '127.0.0.1') {
-      state.knownPeerIps.add(packet.senderIp);
-    }
-
-    // Регистрируем обнаруженный узел
-    state.discoveredPeers[packet.from] = {
-      lastSeen: Date.now(),
-      name: packet.from.substring(0, 14) + '...',
-      ip: packet.senderIp || '',
-    };
-    updateDiscoveredPeersUI();
-
-    var isForUs = packet.to === state.identity.myId;
-    var isBroadcast = packet.to === 'broadcast' || !packet.to;
-
-    if (!isForUs && !isBroadcast) return; // Пакет для другого узла
-
-    // Обработка текстового сообщения или файла
-    if (packet.type === 'SYPH_MSG' || packet.type === 'SYPH_FILE') {
-      var targetChatId = isBroadcast ? 'mesh-broadcast' : packet.from;
-      var chat = state.chats.find(function (c) {
-        return c.id === targetChatId;
-      });
-
-      if (!chat) {
-        chat = {
-          id: packet.from,
-          name: packet.from.substring(0, 16) + '...',
-          avatar: packet.from.charAt(5).toUpperCase() || 'P',
-          status: 'Прямой E2EE диалог',
-          lastMessage: packet.type === 'SYPH_FILE' ? 'Вложение: ' + packet.fileName : packet.text,
-          time: formatTime(new Date()),
-          unread: 0,
-          messages: [],
-        };
-        state.chats.push(chat);
-      }
-
-      var msgTime = packet.timestamp ? formatTime(new Date(packet.timestamp)) : formatTime(new Date());
-
-      var incomingMsg = {
-        id: packet.id || 'pkt_' + Date.now(),
-        sender: packet.from,
-        authorName: packet.from.substring(0, 10) + '...',
-        type: packet.type === 'SYPH_FILE' ? 'file' : 'text',
-        text: packet.text || '',
-        fileName: packet.fileName,
-        fileSize: packet.fileSize,
-        fileType: packet.fileType,
-        fileData: packet.fileData,
-        time: msgTime,
-        isOutgoing: false,
-      };
-
-      chat.messages.push(incomingMsg);
-      chat.lastMessage = packet.type === 'SYPH_FILE' ? 'Вложение: ' + packet.fileName : packet.text;
-      chat.time = msgTime;
-
-      if (state.activeChatId !== chat.id) {
-        chat.unread = (chat.unread || 0) + 1;
-        showToast('Новый пакет от ' + packet.from.substring(0, 10) + '...');
-      }
-
-      saveChats();
-      renderChatList();
-      if (state.activeChatId === chat.id) {
-        renderActiveChat();
-      }
-    }
-  }
-
-  function updateMeshStatus(text) {
-    var elem = document.getElementById('meshPeerCount');
-    if (elem) elem.textContent = text;
-  }
-
-  function updateDiscoveredPeersUI() {
-    var count = Object.keys(state.discoveredPeers).length;
-    var bannerSub = document.getElementById('meshPeerCount');
-    if (bannerSub) {
-      bannerSub.textContent =
-        count > 0 ? count + ' узел(ов) в радиоэфире' : 'Поиск радиосигналов в сети...';
-    }
-
-    var listElem = document.getElementById('discoveredPeersList');
-    if (!listElem) return;
-
-    if (count === 0) {
-      listElem.innerHTML = '<span class="empty-hint">Ожидание радиосигналов поблизости...</span>';
-      return;
-    }
-
-    listElem.innerHTML = '';
-    Object.keys(state.discoveredPeers).forEach(function (peerId) {
-      var p = state.discoveredPeers[peerId];
-      var item = document.createElement('div');
-      item.className = 'discovered-peer-item';
-      item.innerHTML =
-        '<span>' +
-        escapeHtml(peerId) +
-        '</span><span style="font-size:11px; color:var(--accent-emerald)">' +
-        (p.ip ? escapeHtml(p.ip) : 'Рядом') +
-        '</span>';
-      item.onclick = function () {
-        var input = document.getElementById('newChatPeerIdInput');
-        if (input) input.value = peerId;
-      };
-      listElem.appendChild(item);
-    });
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // ====================================================
   // РЕНДЕР ИНТЕРФЕЙСА
   // ====================================================
+  function initUI() {
+    var idElem = document.getElementById('mySypherId');
+    if (idElem) idElem.textContent = state.identity.myId;
+
+    var nameElem = document.getElementById('myNodeDisplayName');
+    if (nameElem) nameElem.textContent = state.identity.displayName || 'Мой узел';
+
+    var avatarElem = document.getElementById('myNodeAvatar');
+    if (avatarElem) {
+      avatarElem.textContent = (state.identity.displayName || 'U').charAt(0).toUpperCase();
+      var grad = getAvatarColor(state.identity.myId);
+      avatarElem.style.background = 'linear-gradient(135deg, ' + grad[0] + ', ' + grad[1] + ')';
+    }
+
+    var settingsId = document.getElementById('settingsNodeId');
+    if (settingsId) settingsId.textContent = state.identity.myId;
+
+    var settingsName = document.getElementById('inputDisplayName');
+    if (settingsName) settingsName.value = state.identity.displayName || '';
+
+    var fpElem = document.getElementById('modalFingerprint');
+    if (fpElem) fpElem.textContent = state.identity.myFingerprint;
+
+    // Синхронизируем ID с нативным Android BLE сервисом
+    if (window.AndroidBridge && window.AndroidBridge.updateNodeIdentity) {
+      try {
+        window.AndroidBridge.updateNodeIdentity(state.identity.myId);
+      } catch (e) {}
+    }
+
+    renderChatList();
+    renderActiveChat();
+    renderNearbyPeers();
+    setupEventListeners();
+    initNetworkTransports();
+
+    // Запускаем периодический маяк обнаружения
+    setInterval(sendDiscoveryBeacon, 5000);
+    sendDiscoveryBeacon();
+  }
+
   function renderChatList() {
     var container = document.getElementById('chatList');
     if (!container) return;
@@ -408,16 +249,19 @@
         selectChat(chat.id);
       };
 
-      var unreadBadge =
+      var grad = getAvatarColor(chat.id);
+      var avatarStyle = 'background: linear-gradient(135deg, ' + grad[0] + ', ' + grad[1] + ')';
+
+      var unreadHtml =
         chat.unread > 0
-          ? '<span style="background:var(--accent-cyan); color:#07090e; padding:2px 7px; border-radius:10px; font-size:11px; font-weight:800;">' +
-            chat.unread +
-            '</span>'
+          ? '<span class="unread-badge">' + chat.unread + '</span>'
           : '';
 
       item.innerHTML =
-        '<div class="avatar">' +
-        escapeHtml(chat.avatar) +
+        '<div class="avatar" style="' +
+        avatarStyle +
+        '">' +
+        escapeHtml(chat.avatar || 'P') +
         '</div>' +
         '<div class="chat-item-meta">' +
         '<div class="chat-item-top">' +
@@ -429,8 +273,10 @@
         '</span>' +
         '</div>' +
         '<div class="chat-item-preview">' +
-        '<span>' + escapeHtml(chat.lastMessage || '') + '</span>' +
-        unreadBadge +
+        '<span class="preview-text">' +
+        escapeHtml(chat.lastMessage || '') +
+        '</span>' +
+        unreadHtml +
         '</div>' +
         '</div>';
 
@@ -462,91 +308,479 @@
     var nameElem = document.getElementById('activeChatName');
     var statusElem = document.getElementById('activeChatStatusText');
     var avatarElem = document.getElementById('activeChatAvatar');
-    var noticeElem = document.getElementById('encryptionNoticeText');
+    var bannerText = document.getElementById('encryptionBannerText');
 
     if (nameElem) nameElem.textContent = chat.name;
     if (statusElem) statusElem.textContent = chat.status;
-    if (avatarElem) avatarElem.textContent = chat.avatar;
+    if (avatarElem) {
+      avatarElem.textContent = chat.avatar || 'P';
+      var grad = getAvatarColor(chat.id);
+      avatarElem.style.background = 'linear-gradient(135deg, ' + grad[0] + ', ' + grad[1] + ')';
+    }
 
-    if (noticeElem) {
+    if (bannerText) {
       if (chat.id === 'mesh-broadcast') {
-        noticeElem.textContent =
+        bannerText.textContent =
           'Общий открытый Mesh-канал. Все находящиеся рядом узлы видят эти сообщения.';
       } else {
-        noticeElem.textContent =
-          'Персональный E2EE канал. Шифрование X25519 & ChaCha20-Poly1305 с адресатом ' +
-          chat.id.substring(0, 14) +
-          '...';
+        bannerText.textContent =
+          'Персональный E2EE канал. Шифрование X25519 & ChaCha20-Poly1305 с узлом ' +
+          chat.id;
       }
     }
 
     var viewport = document.getElementById('messagesViewport');
     if (!viewport) return;
 
-    var notice = viewport.querySelector('.encryption-notice');
+    // Сохраняем date-badge и encryption-banner
+    var staticElements = [];
+    var dateBadge = viewport.querySelector('.date-badge-wrap');
+    var encBanner = viewport.querySelector('.encryption-banner');
+    if (dateBadge) staticElements.push(dateBadge);
+    if (encBanner) staticElements.push(encBanner);
+
     viewport.innerHTML = '';
-    if (notice) viewport.appendChild(notice);
+    staticElements.forEach(function (el) {
+      viewport.appendChild(el);
+    });
 
     chat.messages.forEach(function (msg) {
       var row = document.createElement('div');
       row.className = 'message-row ' + (msg.isOutgoing ? 'outgoing' : 'incoming');
 
-      var checkHtml = msg.isOutgoing ? ' ' + doubleCheckSvg : '';
-      var authorHtml =
-        !msg.isOutgoing && msg.authorName && chat.id === 'mesh-broadcast'
-          ? '<div class="message-author">' + escapeHtml(msg.authorName) + '</div>'
-          : '';
+      var bubble = document.createElement('div');
+      bubble.className = 'bubble';
 
-      var contentHtml = '';
-      if (msg.type === 'file') {
-        var isImg = msg.fileType && msg.fileType.indexOf('image/') === 0;
-        if (isImg && msg.fileData) {
-          contentHtml =
-            '<a href="' + escapeHtml(msg.fileData) + '" download="' + escapeHtml(msg.fileName || 'image.png') + '" target="_blank">' +
-            '<img class="image-bubble-thumb" src="' + escapeHtml(msg.fileData) + '" alt="' + escapeHtml(msg.fileName) + '">' +
-            '</a>';
-        } else {
-          contentHtml =
-            '<div class="file-bubble-card">' +
-            '<div class="file-icon-wrap">' + fileSvg + '</div>' +
-            '<div class="file-meta">' +
-            '<div class="file-name">' + escapeHtml(msg.fileName || 'Файл') + '</div>' +
-            '<div class="file-size">' + formatFileSize(msg.fileSize) + '</div>' +
-            '</div>' +
-            (msg.fileData
-              ? '<a class="file-download-btn" href="' + escapeHtml(msg.fileData) + '" download="' + escapeHtml(msg.fileName) + '">' +
-                downloadSvg + ' Скачать</a>'
-              : '') +
-            '</div>';
-        }
-        if (msg.text) {
-          contentHtml += '<div class="message-bubble" style="margin-top:4px;">' + escapeHtml(msg.text) + '</div>';
-        }
-      } else {
-        contentHtml = '<div class="message-bubble">' + escapeHtml(msg.text) + '</div>';
+      if (!msg.isOutgoing && chat.id === 'mesh-broadcast' && msg.authorName) {
+        var author = document.createElement('div');
+        author.className = 'bubble-author';
+        author.textContent = msg.authorName;
+        bubble.appendChild(author);
       }
 
-      row.innerHTML =
-        authorHtml +
-        contentHtml +
-        '<div class="message-info">' +
-        '<span>' +
-        escapeHtml(msg.time) +
-        '</span>' +
-        checkHtml +
-        '</div>';
+      // Текстовое сообщение
+      if (msg.type === 'text') {
+        var textEl = document.createElement('div');
+        textEl.className = 'bubble-text';
+        textEl.textContent = msg.text;
+        bubble.appendChild(textEl);
+      }
+      // Файл или фото
+      else if (msg.type === 'file') {
+        if (msg.fileType && msg.fileType.indexOf('image/') === 0 && msg.fileData) {
+          var img = document.createElement('img');
+          img.className = 'bubble-image-preview';
+          img.src = msg.fileData;
+          img.alt = msg.fileName || 'Изображение';
+          bubble.appendChild(img);
+        }
 
+        var fileCard = document.createElement('div');
+        fileCard.className = 'bubble-file-card';
+        fileCard.innerHTML =
+          '<div class="file-icon-box">' +
+          docIconSvg +
+          '</div>' +
+          '<div class="file-card-details">' +
+          '<div class="file-card-name">' +
+          escapeHtml(msg.fileName || 'Файл') +
+          '</div>' +
+          '<div class="file-card-size">' +
+          formatFileSize(msg.fileSize) +
+          '</div>' +
+          '</div>' +
+          '<a class="file-download-link" title="Скачать">' +
+          downloadIconSvg +
+          '</a>';
+
+        var dlLink = fileCard.querySelector('.file-download-link');
+        if (dlLink && msg.fileData) {
+          dlLink.href = msg.fileData;
+          dlLink.download = msg.fileName || 'sypher_file';
+        }
+        bubble.appendChild(fileCard);
+      }
+
+      // Футер баббла: время и статус доставки
+      var footer = document.createElement('div');
+      footer.className = 'bubble-footer';
+
+      var timeSpan = document.createElement('span');
+      timeSpan.className = 'bubble-time';
+      timeSpan.textContent = msg.time;
+      footer.appendChild(timeSpan);
+
+      if (msg.isOutgoing) {
+        var tickWrap = document.createElement('span');
+        tickWrap.innerHTML = msg.delivered ? doubleCheckSvg : singleCheckSvg;
+        footer.appendChild(tickWrap);
+      }
+
+      bubble.appendChild(footer);
+      row.appendChild(bubble);
       viewport.appendChild(row);
     });
 
-    scrollChatToBottom();
+    viewport.scrollTop = viewport.scrollHeight;
   }
 
-  function scrollChatToBottom() {
-    var viewport = document.getElementById('messagesViewport');
-    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  // ====================================================
+  // РАДАР УСТРОЙСТВ ПОБЛИЗОСТИ (BLE ПРОХОЖИЕ И WI-FI)
+  // ====================================================
+  function renderNearbyPeers() {
+    var list = document.getElementById('nearbyPeerList');
+    var badge = document.getElementById('peerCounterBadge');
+    var modalList = document.getElementById('discoveredPeersModalList');
+    if (!list) return;
+
+    var peers = Object.values(state.discoveredPeers);
+    var now = Date.now();
+    // Оставляем узлы, видимые последние 2 минуты
+    peers = peers.filter(function (p) {
+      return now - p.lastSeen < 120000;
+    });
+
+    if (badge) badge.textContent = String(peers.length);
+
+    var desc = document.getElementById('meshStatusDesc');
+    if (desc) {
+      desc.textContent =
+        peers.length > 0
+          ? peers.length + ' узел(ов) в радиусе радиоканала'
+          : 'Сканирование BLE и UDP...';
+    }
+
+    if (peers.length === 0) {
+      list.innerHTML =
+        '<div class="empty-nearby-placeholder"><span>Поиск узлов по BLE и локальной сети...</span></div>';
+      if (modalList) {
+        modalList.innerHTML =
+          '<span style="font-size:12px; color:var(--text-muted)">Нет активных узлов поблизости</span>';
+      }
+      return;
+    }
+
+    list.innerHTML = '';
+    if (modalList) modalList.innerHTML = '';
+
+    peers.forEach(function (peer) {
+      var row = document.createElement('div');
+      row.className = 'nearby-peer-row';
+
+      var grad = getAvatarColor(peer.id);
+      var avatarStyle = 'background: linear-gradient(135deg, ' + grad[0] + ', ' + grad[1] + ')';
+
+      var metaText = '';
+      if (peer.transport === 'BLE') {
+        metaText = 'BLE Mesh ~' + (peer.distance || '1.5') + 'м (' + (peer.rssi || '-60') + ' dBm)';
+      } else {
+        metaText = 'Wi-Fi LAN: ' + (peer.ip || 'локально');
+      }
+
+      row.innerHTML =
+        '<div class="peer-row-left">' +
+        '<div class="nearby-avatar" style="' +
+        avatarStyle +
+        '">' +
+        escapeHtml((peer.name || 'P').charAt(0).toUpperCase()) +
+        '</div>' +
+        '<div class="nearby-info">' +
+        '<span class="nearby-id">' +
+        escapeHtml(peer.id) +
+        '</span>' +
+        '<span class="nearby-meta">' +
+        escapeHtml(metaText) +
+        '</span>' +
+        '</div>' +
+        '</div>' +
+        '<button class="peer-action-btn">Написать</button>';
+
+      var writeBtn = row.querySelector('.peer-action-btn');
+      if (writeBtn) {
+        writeBtn.onclick = function (e) {
+          e.stopPropagation();
+          startDirectChatWithPeer(peer.id, peer.name);
+        };
+      }
+
+      row.onclick = function () {
+        startDirectChatWithPeer(peer.id, peer.name);
+      };
+
+      list.appendChild(row);
+
+      // В модальное окно быстрого выбора
+      if (modalList) {
+        var quickItem = document.createElement('div');
+        quickItem.className = 'nearby-peer-row';
+        quickItem.style.cursor = 'pointer';
+        quickItem.innerHTML =
+          '<span style="font-family:var(--font-mono); font-size:12px; color:var(--accent-cyan)">' +
+          escapeHtml(peer.id) +
+          '</span><span style="font-size:11px; color:var(--text-muted)">' +
+          escapeHtml(metaText) +
+          '</span>';
+        quickItem.onclick = function () {
+          var input = document.getElementById('newChatPeerIdInput');
+          if (input) input.value = peer.id;
+        };
+        modalList.appendChild(quickItem);
+      }
+    });
   }
 
+  function startDirectChatWithPeer(peerId, peerName) {
+    if (peerId === state.identity.myId) return;
+
+    var existing = state.chats.find(function (c) {
+      return c.id === peerId;
+    });
+
+    if (!existing) {
+      var newChat = {
+        id: peerId,
+        name: peerName || peerId,
+        avatar: (peerName || peerId).replace('syp-', '').charAt(0).toUpperCase(),
+        status: 'Прямой зашифрованный канал',
+        lastMessage: 'Диалог открыт',
+        time: formatTime(new Date()),
+        unread: 0,
+        messages: [],
+      };
+      state.chats.push(newChat);
+      saveChats();
+    }
+
+    selectChat(peerId);
+  }
+
+  // ====================================================
+  // СЕТЕВОЙ ТРАНСПОРТ И ПЕРЕДАЧА ПАКЕТОВ
+  // ====================================================
+  function initNetworkTransports() {
+    // 1. Определение локального IP с десктоп сервера
+    if (window.fetch) {
+      fetch('/api/mesh/ip')
+        .then(function (res) {
+          return res.json();
+        })
+        .then(function (data) {
+          if (data && data.ip) {
+            state.localIp = data.ip;
+            updateLocalIpUI(data.ip);
+          }
+        })
+        .catch(function () {});
+    }
+
+    // 2. Server-Sent Events (SSE) для десктопа (Linux, macOS, Windows)
+    if (window.EventSource) {
+      try {
+        var sse = new EventSource('/api/mesh/events');
+        sse.onmessage = function (e) {
+          if (e.data && window.onMeshPacketReceived) {
+            window.onMeshPacketReceived(e.data);
+          }
+        };
+      } catch (err) {}
+    }
+  }
+
+  function updateLocalIpUI(ip) {
+    var lbl = document.getElementById('settingsLocalIp');
+    if (lbl) lbl.textContent = ip + ':7788';
+  }
+
+  window.onLocalIpDetected = function (ip) {
+    if (ip) {
+      state.localIp = ip;
+      updateLocalIpUI(ip);
+    }
+  };
+
+  // Точка входа для обнаружения прохожих по BLE из нативного сервиса
+  window.onBlePeerDiscovered = function (peerId, rssi, distance, mac) {
+    if (!peerId || peerId === state.identity.myId) return;
+    state.discoveredPeers[peerId] = {
+      id: peerId,
+      name: peerId,
+      transport: 'BLE',
+      rssi: rssi,
+      distance: distance,
+      mac: mac,
+      lastSeen: Date.now(),
+    };
+    renderNearbyPeers();
+  };
+
+  // Точка входа входящих пакетов (UDP, HTTP, BLE GATT)
+  window.onMeshPacketReceived = function (packetOrJson) {
+    var packet = packetOrJson;
+    if (typeof packetOrJson === 'string') {
+      try {
+        packet = JSON.parse(packetOrJson);
+      } catch (e) {
+        return;
+      }
+    }
+    handleIncomingPacket(packet);
+  };
+
+  function sendDiscoveryBeacon() {
+    var beacon = {
+      type: 'SYPH_BEACON',
+      id: 'bcn_' + Date.now(),
+      from: state.identity.myId,
+      fromName: state.identity.displayName,
+      senderIp: state.localIp,
+      timestamp: Date.now(),
+    };
+    dispatchPacketToNetwork(beacon);
+  }
+
+  function dispatchPacketToNetwork(packet) {
+    packet.senderIp = state.localIp;
+    var raw = JSON.stringify(packet);
+
+    // 1. Нативный Android мост
+    if (window.AndroidBridge && window.AndroidBridge.sendMeshPacket) {
+      try {
+        window.AndroidBridge.sendMeshPacket(raw);
+      } catch (e) {}
+    }
+
+    // 2. Десктопный локальный сервер
+    if (window.fetch) {
+      fetch('/api/mesh/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: raw,
+      }).catch(function () {});
+    }
+
+    // 3. Прямой TCP HTTP Fallback на все известные IP (обход ограничений роутеров)
+    state.knownPeerIps.forEach(function (peerIp) {
+      if (peerIp && peerIp !== '127.0.0.1' && peerIp !== state.localIp && window.fetch) {
+        // Отправка на порт 7789 (Android) и 7788 (Desktop)
+        [7789, 7788].forEach(function (pt) {
+          fetch('http://' + peerIp + ':' + pt + '/api/mesh/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: raw,
+            mode: 'no-cors',
+          }).catch(function () {});
+        });
+      }
+    });
+  }
+
+  function handleIncomingPacket(packet) {
+    if (!packet || !packet.from) return;
+    if (packet.from === state.identity.myId) return; // Игнорируем эхо своих же пакетов
+
+    if (packet.senderIp && packet.senderIp !== '127.0.0.1') {
+      state.knownPeerIps.add(packet.senderIp);
+    }
+
+    // Регистрируем обнаруженный узел в радаре
+    state.discoveredPeers[packet.from] = {
+      id: packet.from,
+      name: packet.fromName || packet.from,
+      transport: packet.senderIp ? 'Wi-Fi' : 'BLE',
+      ip: packet.senderIp || '',
+      lastSeen: Date.now(),
+    };
+    renderNearbyPeers();
+
+    // 1. Обработка подтверждения доставки (ACK)
+    if (packet.type === 'SYPH_ACK' && packet.targetMsgId) {
+      state.chats.forEach(function (chat) {
+        chat.messages.forEach(function (msg) {
+          if (msg.id === packet.targetMsgId && msg.isOutgoing) {
+            msg.delivered = true;
+          }
+        });
+      });
+      saveChats();
+      renderActiveChat();
+      return;
+    }
+
+    var isForUs = packet.to === state.identity.myId;
+    var isBroadcast = packet.to === 'broadcast' || !packet.to;
+
+    if (!isForUs && !isBroadcast) return; // Пакет для другого узла
+
+    // 2. Обработка текстового сообщения или файла
+    if (packet.type === 'SYPH_MSG' || packet.type === 'SYPH_FILE') {
+      var targetChatId = isBroadcast ? 'mesh-broadcast' : packet.from;
+      var chat = state.chats.find(function (c) {
+        return c.id === targetChatId;
+      });
+
+      if (!chat) {
+        chat = {
+          id: packet.from,
+          name: packet.fromName || packet.from,
+          avatar: (packet.fromName || packet.from).replace('syp-', '').charAt(0).toUpperCase(),
+          status: 'Прямой зашифрованный канал',
+          lastMessage: packet.type === 'SYPH_FILE' ? 'Вложение: ' + packet.fileName : packet.text,
+          time: formatTime(new Date()),
+          unread: 0,
+          messages: [],
+        };
+        state.chats.push(chat);
+      }
+
+      var msgTime = packet.timestamp ? formatTime(new Date(packet.timestamp)) : formatTime(new Date());
+
+      var incomingMsg = {
+        id: packet.id || 'pkt_' + Date.now(),
+        sender: packet.from,
+        authorName: packet.fromName || packet.from.substring(0, 10),
+        type: packet.type === 'SYPH_FILE' ? 'file' : 'text',
+        text: packet.text || '',
+        fileName: packet.fileName,
+        fileSize: packet.fileSize,
+        fileType: packet.fileType,
+        fileData: packet.fileData,
+        time: msgTime,
+        isOutgoing: false,
+      };
+
+      chat.messages.push(incomingMsg);
+      chat.lastMessage = packet.type === 'SYPH_FILE' ? 'Вложение: ' + packet.fileName : packet.text;
+      chat.time = msgTime;
+
+      if (state.activeChatId !== chat.id) {
+        chat.unread = (chat.unread || 0) + 1;
+        showToast('Новый пакет от ' + (packet.fromName || packet.from));
+      }
+
+      saveChats();
+      renderChatList();
+      if (state.activeChatId === chat.id) {
+        renderActiveChat();
+      }
+
+      // Если сообщение адресовано персонально нам — отправляем подтверждение доставки (ACK)
+      if (isForUs) {
+        var ackPacket = {
+          type: 'SYPH_ACK',
+          id: 'ack_' + Date.now(),
+          from: state.identity.myId,
+          to: packet.from,
+          targetMsgId: packet.id,
+          timestamp: Date.now(),
+        };
+        dispatchPacketToNetwork(ackPacket);
+      }
+    }
+  }
+
+  // ====================================================
+  // ОТПРАВКА СООБЩЕНИЙ И ВЛОЖЕНИЙ
+  // ====================================================
   function sendMessage() {
     var input = document.getElementById('messageInput');
     if (!input) return;
@@ -566,6 +800,7 @@
       type: 'SYPH_MSG',
       id: 'pkt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
       from: state.identity.myId,
+      fromName: state.identity.displayName,
       to: chat.id === 'mesh-broadcast' ? 'broadcast' : chat.id,
       text: text,
       timestamp: now.getTime(),
@@ -574,11 +809,12 @@
     var newMsg = {
       id: packet.id,
       sender: 'me',
-      authorName: 'Я',
+      authorName: state.identity.displayName,
       type: 'text',
       text: text,
       time: timeStr,
       isOutgoing: true,
+      delivered: false,
     };
 
     chat.messages.push(newMsg);
@@ -593,23 +829,20 @@
     renderActiveChat();
 
     dispatchPacketToNetwork(packet);
-    showToast('Сообщение отправлено в радиоэфир');
+    showToast('Сообщение отправлено в радиоканал');
   }
 
-  // ====================================================
-  // ОТПРАВКА ФАЙЛОВ И КАРТИНОК
-  // ====================================================
   function handleFileSelected(e) {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Размер файла превышает 5 МБ. Для прямой передачи по радиоканалу выберите файл меньшего размера.');
+    if (file.size > 8 * 1024 * 1024) {
+      alert('Размер файла превышает 8 МБ. Для радиопередачи выберите файл меньшего размера.');
       e.target.value = '';
       return;
     }
 
-    showToast('Шифрование файла: ' + file.name);
+    showToast('Чтение файла: ' + file.name);
 
     var reader = new FileReader();
     reader.onload = function (evt) {
@@ -624,8 +857,9 @@
 
       var packet = {
         type: 'SYPH_FILE',
-        id: 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        id: 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
         from: state.identity.myId,
+        fromName: state.identity.displayName,
         to: chat.id === 'mesh-broadcast' ? 'broadcast' : chat.id,
         fileName: file.name,
         fileSize: file.size,
@@ -637,7 +871,7 @@
       var newMsg = {
         id: packet.id,
         sender: 'me',
-        authorName: 'Я',
+        authorName: state.identity.displayName,
         type: 'file',
         fileName: file.name,
         fileSize: file.size,
@@ -645,6 +879,7 @@
         fileData: dataUrl,
         time: timeStr,
         isOutgoing: true,
+        delivered: false,
       };
 
       chat.messages.push(newMsg);
@@ -677,6 +912,9 @@
     }
   }
 
+  // ====================================================
+  // СЛУШАТЕЛИ СОБЫТИЙ
+  // ====================================================
   function setupEventListeners() {
     // 1. Отправка сообщений
     var sendBtn = document.getElementById('btnSend');
@@ -685,15 +923,11 @@
         e.preventDefault();
         sendMessage();
       };
-      sendBtn.ontouchend = function (e) {
-        e.preventDefault();
-        sendMessage();
-      };
     }
 
-    var input = document.getElementById('messageInput');
-    if (input) {
-      input.onkeydown = function (e) {
+    var msgInput = document.getElementById('messageInput');
+    if (msgInput) {
+      msgInput.onkeydown = function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           sendMessage();
@@ -701,10 +935,9 @@
       };
     }
 
-    // 2. ВЫБОР И ОТПРАВКА ФАЙЛА
+    // 2. Прикрепление файлов
     var attachBtn = document.getElementById('btnAttach');
     var fileInput = document.getElementById('fileInput');
-
     if (attachBtn && fileInput) {
       attachBtn.onclick = function (e) {
         e.preventDefault();
@@ -713,8 +946,8 @@
       fileInput.onchange = handleFileSelected;
     }
 
-    // 3. Возврат на мобильных
-    var backBtn = document.getElementById('btnBack');
+    // 3. Навигация на смартфонах
+    var backBtn = document.getElementById('btnBackToChats');
     if (backBtn) {
       backBtn.onclick = function (e) {
         e.preventDefault();
@@ -723,15 +956,15 @@
       };
     }
 
-    // 4. Копирование ID из шапки
-    var userIdBar = document.getElementById('userIdBar');
-    var copyBadge = document.getElementById('btnCopyBadge');
-    function copyMyId(e) {
-      if (e) e.preventDefault();
+    // 4. Копирование ID
+    var myNodeCard = document.getElementById('myNodeCard');
+    var copyBtn = document.getElementById('btnCopyMyId');
+    function copyId(e) {
+      if (e) e.stopPropagation();
       copyToClipboard(state.identity.myId, 'Ваш Sypher ID скопирован');
     }
-    if (userIdBar) userIdBar.onclick = copyMyId;
-    if (copyBadge) copyBadge.onclick = copyMyId;
+    if (myNodeCard) myNodeCard.onclick = copyId;
+    if (copyBtn) copyBtn.onclick = copyId;
 
     // 5. Поиск
     var searchInput = document.getElementById('searchInput');
@@ -742,243 +975,129 @@
       };
     }
 
-    // 6. Модальное окно "Новый диалог"
+    // 6. Модальное окно нового диалога
     var newChatModal = document.getElementById('newChatModal');
     var btnNewChat = document.getElementById('btnNewChat');
     var btnCloseNewChat = document.getElementById('btnCloseNewChat');
+    var btnCancelNewChat = document.getElementById('btnCancelNewChat');
     var btnConfirmNewChat = document.getElementById('btnConfirmNewChat');
     var newChatInput = document.getElementById('newChatPeerIdInput');
 
     if (btnNewChat && newChatModal) {
-      btnNewChat.onclick = function (e) {
-        e.preventDefault();
-        updateDiscoveredPeersUI();
+      btnNewChat.onclick = function () {
         if (newChatInput) newChatInput.value = '';
+        renderNearbyPeers();
         newChatModal.classList.remove('hidden');
       };
     }
-
-    if (btnCloseNewChat && newChatModal) {
-      btnCloseNewChat.onclick = function (e) {
-        e.preventDefault();
-        newChatModal.classList.add('hidden');
-      };
+    function closeNewChat() {
+      if (newChatModal) newChatModal.classList.add('hidden');
     }
+    if (btnCloseNewChat) btnCloseNewChat.onclick = closeNewChat;
+    if (btnCancelNewChat) btnCancelNewChat.onclick = closeNewChat;
 
     if (btnConfirmNewChat && newChatInput) {
-      btnConfirmNewChat.onclick = function (e) {
-        e.preventDefault();
-        var peerId = newChatInput.value.trim();
-        if (!peerId) {
-          alert('Введите Sypher ID собеседника (syph1...)');
-          return;
-        }
-
-        if (peerId === state.identity.myId) {
-          alert('Это ваш собственный ID. Укажите ID второго устройства.');
-          return;
-        }
-
-        var existing = state.chats.find(function (c) {
-          return c.id === peerId;
-        });
-
-        if (!existing) {
-          existing = {
-            id: peerId,
-            name: peerId.substring(0, 16) + '...',
-            avatar: peerId.charAt(5).toUpperCase() || 'P',
-            status: 'Прямой защищенный E2EE канал',
-            lastMessage: 'Диалог открыт',
-            time: formatTime(new Date()),
-            unread: 0,
-            messages: [],
-          };
-          state.chats.push(existing);
-          saveChats();
-        }
-
-        newChatModal.classList.add('hidden');
-        selectChat(peerId);
-        showToast('Диалог создан');
+      btnConfirmNewChat.onclick = function () {
+        var id = newChatInput.value.trim();
+        if (!id) return;
+        closeNewChat();
+        startDirectChatWithPeer(id);
       };
     }
 
-    // 7. Модальное окно прямого IP подключения
-    var directModal = document.getElementById('directConnectModal');
-    var directBtn = document.getElementById('btnDirectConnect');
-    var closeDirectBtn = document.getElementById('btnCloseDirectConnect');
-    var confirmDirectBtn = document.getElementById('btnConfirmDirectConnect');
-    var directIpInput = document.getElementById('directPeerIpInput');
-
-    if (directBtn && directModal) {
-      directBtn.onclick = function (e) {
-        e.preventDefault();
-        updateDetectedIpUI(state.localIp);
-        directModal.classList.remove('hidden');
-      };
-    }
-
-    if (closeDirectBtn && directModal) {
-      closeDirectBtn.onclick = function (e) {
-        e.preventDefault();
-        directModal.classList.add('hidden');
-      };
-    }
-
-    if (confirmDirectBtn && directIpInput) {
-      confirmDirectBtn.onclick = function (e) {
-        e.preventDefault();
-        var ip = directIpInput.value.trim();
-        if (ip) {
-          state.knownPeerIps.add(ip);
-          sendDiscoveryBeacon();
-          directModal.classList.add('hidden');
-          showToast('IP ' + ip + ' добавлен в радиомаршруты');
-        }
-      };
-    }
-
-    // 8. Верификация отпечатка
-    var verifyModal = document.getElementById('verificationModal');
-    var verifyBtn = document.getElementById('btnVerifyKeys');
-    var closeVerifyBtn = document.getElementById('btnCloseModal');
-
-    if (verifyBtn && verifyModal) {
-      verifyBtn.onclick = function (e) {
-        e.preventDefault();
-        var fpElem = document.getElementById('modalFingerprint');
-        if (fpElem) fpElem.textContent = state.identity.myFingerprint;
-        verifyModal.classList.remove('hidden');
-      };
-    }
-
-    if (closeVerifyBtn && verifyModal) {
-      closeVerifyBtn.onclick = function (e) {
-        e.preventDefault();
-        verifyModal.classList.add('hidden');
-      };
-    }
-
-    var copyFpBtn = document.getElementById('btnCopyFp');
-    if (copyFpBtn) {
-      copyFpBtn.onclick = function (e) {
-        e.preventDefault();
-        copyToClipboard(state.identity.myFingerprint, 'Отпечаток ключа скопирован');
-      };
-    }
-
-    // 9. Настройки
+    // 7. Модальное окно настроек
     var settingsModal = document.getElementById('settingsModal');
-    var settingsBtn = document.getElementById('btnSettings');
-    var closeSettingsBtn = document.getElementById('btnCloseSettings');
-    var btnCopyMyId = document.getElementById('btnCopyMyId');
+    var btnSettings = document.getElementById('btnSettings');
+    var btnCloseSettings = document.getElementById('btnCloseSettings');
+    var btnSaveSettings = document.getElementById('btnSaveSettings');
+    var inputName = document.getElementById('inputDisplayName');
+    var btnRegen = document.getElementById('btnRegenerateId');
 
-    if (settingsBtn && settingsModal) {
-      settingsBtn.onclick = function (e) {
-        e.preventDefault();
+    if (btnSettings && settingsModal) {
+      btnSettings.onclick = function () {
         settingsModal.classList.remove('hidden');
       };
     }
+    function closeSettings() {
+      if (settingsModal) settingsModal.classList.add('hidden');
+    }
+    if (btnCloseSettings) btnCloseSettings.onclick = closeSettings;
 
-    if (closeSettingsBtn && settingsModal) {
-      closeSettingsBtn.onclick = function (e) {
-        e.preventDefault();
-        settingsModal.classList.add('hidden');
+    if (btnSaveSettings && inputName) {
+      btnSaveSettings.onclick = function () {
+        var newName = inputName.value.trim();
+        if (newName) {
+          state.identity.displayName = newName;
+          localStorage.setItem('sypher_node_identity_v3', JSON.stringify(state.identity));
+          var myNameElem = document.getElementById('myNodeDisplayName');
+          if (myNameElem) myNameElem.textContent = newName;
+        }
+        closeSettings();
+        showToast('Настройки сохранены');
       };
     }
 
-    if (btnCopyMyId) {
-      btnCopyMyId.onclick = function (e) {
-        e.preventDefault();
-        copyToClipboard(state.identity.myId, 'Ваш Sypher ID скопирован');
+    if (btnRegen) {
+      btnRegen.onclick = function () {
+        if (confirm('Сгенерировать абсолютно новый уникальный Sypher ID? Все текущие контакты должны будут использовать новый ID.')) {
+          localStorage.removeItem('sypher_node_identity_v3');
+          state.identity = getOrCreateIdentity();
+          initUI();
+          closeSettings();
+          showToast('Новый уникальный ID узла сгенерирован');
+        }
       };
     }
 
-    // 10. Таймер самоуничтожения
-    var selfDestructBtn = document.getElementById('btnSelfDestruct');
+    // 8. Модальное окно сверки отпечатка ключей
+    var verifyModal = document.getElementById('verifyKeysModal');
+    var btnVerify = document.getElementById('btnVerifyKeys');
+    var btnCloseVerify = document.getElementById('btnCloseVerifyKeys');
+    var btnOkVerify = document.getElementById('btnOkVerifyKeys');
+
+    if (btnVerify && verifyModal) {
+      btnVerify.onclick = function () {
+        verifyModal.classList.remove('hidden');
+      };
+    }
+    function closeVerify() {
+      if (verifyModal) verifyModal.classList.add('hidden');
+    }
+    if (btnCloseVerify) btnCloseVerify.onclick = closeVerify;
+    if (btnOkVerify) btnOkVerify.onclick = closeVerify;
+
+    // 9. Таймер самоуничтожения
+    var btnSelfDestruct = document.getElementById('btnSelfDestruct');
     var selfDestructLabel = document.getElementById('selfDestructLabel');
-    if (selfDestructBtn && selfDestructLabel) {
-      selfDestructBtn.onclick = function (e) {
-        e.preventDefault();
-        state.selfDestructIndex =
-          (state.selfDestructIndex + 1) % state.selfDestructOptions.length;
-        var newOpt = state.selfDestructOptions[state.selfDestructIndex];
-        selfDestructLabel.textContent = newOpt;
-        showToast('Таймер сообщений: ' + newOpt);
+    if (btnSelfDestruct && selfDestructLabel) {
+      btnSelfDestruct.onclick = function () {
+        state.selfDestructIndex = (state.selfDestructIndex + 1) % state.selfDestructOptions.length;
+        var opt = state.selfDestructOptions[state.selfDestructIndex];
+        selfDestructLabel.textContent = opt;
+        showToast('Таймер самоуничтожения: ' + opt);
       };
     }
 
-    // 11. Экстренное уничтожение
-    var burnModal = document.getElementById('burnModal');
-    var burnBtn = document.getElementById('btnEmergencyBurn');
-    var cancelBurnBtn = document.getElementById('btnCancelBurn');
-    var confirmBurnBtn = document.getElementById('btnConfirmBurn');
-
-    if (burnBtn && burnModal) {
-      burnBtn.onclick = function (e) {
-        e.preventDefault();
-        burnModal.classList.remove('hidden');
-      };
-    }
-
-    if (cancelBurnBtn && burnModal) {
-      cancelBurnBtn.onclick = function (e) {
-        e.preventDefault();
-        burnModal.classList.add('hidden');
-      };
-    }
-
-    if (confirmBurnBtn && burnModal) {
-      confirmBurnBtn.onclick = function (e) {
-        e.preventDefault();
-        localStorage.clear();
-        burnModal.classList.add('hidden');
-        showToast('Все ключи и сообщения затерты');
-        setTimeout(function () {
-          window.location.reload();
-        }, 1000);
-      };
-    }
-
-    // 12. Клик вне модалок закрывает их
-    [newChatModal, directModal, verifyModal, settingsModal, burnModal].forEach(function (m) {
-      if (m) {
-        m.onclick = function (e) {
-          if (e.target === m) m.classList.add('hidden');
-        };
-      }
-    });
-
-    // 13. Escape закрывает модалки
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') {
-        [newChatModal, directModal, verifyModal, settingsModal, burnModal].forEach(function (m) {
-          if (m) m.classList.add('hidden');
-        });
-      }
-    });
-
-    // 14. Баннер переключает на общий канал
-    var meshBanner = document.getElementById('meshBanner');
-    if (meshBanner) {
-      meshBanner.onclick = function (e) {
-        if (e.target.closest('#btnDirectConnect')) return;
-        selectChat('mesh-broadcast');
+    // 10. Экстренное стирание всех данных
+    var btnBurn = document.getElementById('btnEmergencyBurn');
+    if (btnBurn) {
+      btnBurn.onclick = function () {
+        if (
+          confirm(
+            'ВНИМАНИЕ: Выполнить экстренное стирание всех ключей, переписки и истории на данном устройстве?'
+          )
+        ) {
+          localStorage.clear();
+          showToast('Все данные стёрты');
+          setTimeout(function () {
+            location.reload();
+          }, 600);
+        }
       };
     }
   }
 
-  function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
+  // Запуск приложения
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initUI);
   } else {

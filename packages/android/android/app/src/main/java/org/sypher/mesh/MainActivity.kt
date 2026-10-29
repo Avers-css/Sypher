@@ -11,29 +11,24 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.util.Log
-import android.webkit.JavascriptInterface
-import android.webkit.JsResult
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import org.json.JSONObject
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.Inet4Address
-import java.net.InetAddress
-import java.net.MulticastSocket
-import java.net.NetworkInterface
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStream
+import java.net.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
 /**
  * Main Activity for Sypher Android Client.
- * Displays the dark glassmorphism messenger interface,
- * bridges JavaScript to local UDP Multicast (239.255.77.88:7788) & Subnet Broadcast,
- * handles native file choosing for encrypted file sharing,
- * and coordinates with the background SypherMeshService BLE radio.
+ * Implements full dual-stack communication:
+ * 1. Offline BLE Mesh (Proximity sneakernet discovery & GATT transport)
+ * 2. UDP Radio (Multicast 239.255.77.88:7788 + Subnet Broadcast + Direct Unicast)
+ * 3. Embedded Local HTTP Receiver (port 7789) to guarantee packet delivery even on restricted Wi-Fi routers
+ * 4. Native WebChromeClient for encrypted file sharing
  */
 class MainActivity : Activity() {
 
@@ -41,26 +36,36 @@ class MainActivity : Activity() {
         private const val TAG = "SypherMainActivity"
         private const val PERMISSION_REQUEST_CODE = 42
         private const val FILE_CHOOSER_REQUEST_CODE = 1001
+
         const val MULTICAST_GROUP = "239.255.77.88"
         const val BROADCAST_ADDR = "255.255.255.255"
         const val MULTICAST_PORT = 7788
+        const val HTTP_FALLBACK_PORT = 7789
+
+        var instance: MainActivity? = null
     }
 
     private lateinit var webView: WebView
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private var isMeshRunning = true
     private var multicastSocket: MulticastSocket? = null
+    private var httpServerSocket: ServerSocket? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    // Discovered BLE peer MAC mapping: peerId -> macAddress
+    private val blePeerMap = ConcurrentHashMap<String, String>()
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instance = this
 
         try {
-            window.decorView.setBackgroundColor(Color.parseColor("#07090E"))
+            window.decorView.setBackgroundColor(Color.parseColor("#05070A"))
 
             webView = WebView(this).apply {
-                setBackgroundColor(Color.parseColor("#07090E"))
+                setBackgroundColor(Color.parseColor("#05070A"))
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
@@ -72,20 +77,17 @@ class MainActivity : Activity() {
                     loadWithOverviewMode = true
                 }
 
-                // Expose Native Android Mesh Bridge to JavaScript
                 addJavascriptInterface(AndroidMeshBridge(this@MainActivity), "AndroidBridge")
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        Log.i(TAG, "Sypher UI loaded successfully: $url")
-                        // Push detected local IP to web interface
+                        Log.i(TAG, "Sypher UI loaded: $url")
                         val localIp = getLocalIpAddress()
                         view?.evaluateJavascript("if(window.onLocalIpDetected) window.onLocalIpDetected('$localIp');", null)
                     }
                 }
 
                 webChromeClient = object : WebChromeClient() {
-                    // 1. Native File Chooser for Encrypted File Attachments
                     override fun onShowFileChooser(
                         mWebView: WebView?,
                         filePathCallback: ValueCallback<Array<Uri>>?,
@@ -133,10 +135,14 @@ class MainActivity : Activity() {
             setContentView(webView)
             webView.loadUrl("file:///android_asset/index.html")
 
-            // Start native UDP Multicast & Broadcast listener
-            startUdpMulticastListener()
+            // Acquire locks to keep radio listeners active in background
+            acquireLocks()
 
-            // Request runtime permissions on Android 12+ and start BLE mesh service
+            // Start UDP Listener & Embedded HTTP server
+            startUdpMulticastListener()
+            startEmbeddedHttpListener()
+
+            // Request runtime permissions and initialize BLE service
             checkAndRequestPermissions()
 
         } catch (t: Throwable) {
@@ -156,78 +162,222 @@ class MainActivity : Activity() {
         }
     }
 
-    fun broadcastUdpPacket(payloadJson: String) {
-        thread(name = "SypherUdpSender", isDaemon = true) {
-            try {
-                val socket = DatagramSocket().apply {
-                    broadcast = true
-                }
-                val bytes = payloadJson.toByteArray(Charsets.UTF_8)
-
-                // 1. Send via Multicast
-                try {
-                    val mGroup = InetAddress.getByName(MULTICAST_GROUP)
-                    val mPacket = DatagramPacket(bytes, bytes.size, mGroup, MULTICAST_PORT)
-                    socket.send(mPacket)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Multicast send error: ${e.message}")
-                }
-
-                // 2. Send via Subnet Broadcast (bypasses router IGMP/multicast filters)
-                try {
-                    val bGroup = InetAddress.getByName(BROADCAST_ADDR)
-                    val bPacket = DatagramPacket(bytes, bytes.size, bGroup, MULTICAST_PORT)
-                    socket.send(bPacket)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Broadcast send error: ${e.message}")
-                }
-
-                socket.close()
-                Log.d(TAG, "Transmitted packet (${bytes.size} bytes) to Mesh")
-            } catch (e: Exception) {
-                Log.e(TAG, "UDP send error: ${e.message}")
-            }
-        }
-    }
-
-    private fun startUdpMulticastListener() {
+    private fun acquireLocks() {
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             multicastLock = wifiManager?.createMulticastLock("sypherMulticastLock")?.apply {
                 setReferenceCounted(true)
                 acquire()
             }
-            Log.i(TAG, "MulticastLock acquired")
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "sypher:wakeLock")?.apply {
+                acquire(10 * 60 * 1000L) // 10 minutes default
+            }
         } catch (e: Exception) {
-            Log.w(TAG, "Could not acquire MulticastLock: ${e.message}")
+            Log.w(TAG, "Could not acquire system locks: ${e.message}")
         }
+    }
 
+    /**
+     * Broadcasts outgoing packet across all transports:
+     * 1. UDP Multicast (239.255.77.88:7788)
+     * 2. UDP Subnet Broadcast & 255.255.255.255:7788
+     * 3. BLE GATT direct to nearby passerby
+     */
+    fun broadcastUdpPacket(payloadJson: String) {
+        thread(name = "SypherPacketBroadcaster", isDaemon = true) {
+            val bytes = payloadJson.toByteArray(Charsets.UTF_8)
+
+            // 1. Send via UDP socket
+            try {
+                val socket = DatagramSocket().apply { broadcast = true }
+
+                // A. Multicast
+                try {
+                    val mGroup = InetAddress.getByName(MULTICAST_GROUP)
+                    socket.send(DatagramPacket(bytes, bytes.size, mGroup, MULTICAST_PORT))
+                } catch (e: Exception) {}
+
+                // B. Universal Broadcast
+                try {
+                    val bGroup = InetAddress.getByName(BROADCAST_ADDR)
+                    socket.send(DatagramPacket(bytes, bytes.size, bGroup, MULTICAST_PORT))
+                } catch (e: Exception) {}
+
+                // C. Specific Subnet Broadcasts
+                try {
+                    val ifaces = NetworkInterface.getNetworkInterfaces()
+                    while (ifaces.hasMoreElements()) {
+                        val iface = ifaces.nextElement()
+                        if (iface.isLoopback || !iface.isUp) continue
+                        for (addr in iface.interfaceAddresses) {
+                            val bcast = addr.broadcast
+                            if (bcast != null) {
+                                socket.send(DatagramPacket(bytes, bytes.size, bcast, MULTICAST_PORT))
+                            }
+                        }
+                    }
+                } catch (e: Exception) {}
+
+                socket.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "UDP send notice: ${e.message}")
+            }
+
+            // 2. Relay via BLE GATT to all discovered nearby passerby
+            blePeerMap.values.forEach { mac ->
+                try {
+                    SypherMeshService.instance?.sendBlePacket(mac, payloadJson)
+                } catch (e: Exception) {}
+            }
+        }
+    }
+
+    private fun startUdpMulticastListener() {
         thread(name = "SypherUdpListener", isDaemon = true) {
             try {
                 val group = InetAddress.getByName(MULTICAST_GROUP)
                 val socket = MulticastSocket(MULTICAST_PORT).apply {
                     reuseAddress = true
                     broadcast = true
-                    joinGroup(group)
                 }
                 multicastSocket = socket
+
+                // Join multicast on all active interfaces
+                try {
+                    val ifaces = NetworkInterface.getNetworkInterfaces()
+                    while (ifaces.hasMoreElements()) {
+                        val iface = ifaces.nextElement()
+                        if (iface.isLoopback || !iface.isUp) continue
+                        try {
+                            socket.joinGroup(InetSocketAddress(group, MULTICAST_PORT), iface)
+                        } catch (e: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    try { socket.joinGroup(group) } catch (ignored: Exception) {}
+                }
+
                 val buffer = ByteArray(65535)
-                Log.i(TAG, "UDP radio listener active on port $MULTICAST_PORT")
+                Log.i(TAG, "UDP listener ready on port $MULTICAST_PORT")
 
                 while (isMeshRunning) {
                     val packet = DatagramPacket(buffer, buffer.size)
                     socket.receive(packet)
                     val raw = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
-
-                    runOnUiThread {
-                        if (::webView.isInitialized) {
-                            val jsArg = JSONObject.quote(raw)
-                            webView.evaluateJavascript("if(window.onMeshPacketReceived) window.onMeshPacketReceived($jsArg);", null)
-                        }
-                    }
+                    deliverMeshPacket(raw)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "UDP listener stopped: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Embedded HTTP server on port 7789 for fail-proof TCP message reception from PC
+     */
+    private fun startEmbeddedHttpListener() {
+        thread(name = "SypherHttpServer", isDaemon = true) {
+            try {
+                httpServerSocket = ServerSocket(HTTP_FALLBACK_PORT).apply {
+                    reuseAddress = true
+                }
+                Log.i(TAG, "Embedded HTTP receiver active on port $HTTP_FALLBACK_PORT")
+
+                while (isMeshRunning) {
+                    val client = httpServerSocket?.accept() ?: break
+                    thread(isDaemon = true) {
+                        handleClientHttpRequest(client)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Embedded HTTP receiver stopped: ${e.message}")
+            }
+        }
+    }
+
+    private fun handleClientHttpRequest(client: Socket) {
+        try {
+            val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
+            val line = reader.readLine() ?: return
+            val parts = line.split(" ")
+            val method = parts.getOrNull(0) ?: "GET"
+            val path = parts.getOrNull(1) ?: "/"
+
+            var contentLength = 0
+            var headerLine = reader.readLine()
+            while (!headerLine.isNullOrBlank()) {
+                if (headerLine.startsWith("Content-Length:", ignoreCase = true)) {
+                    contentLength = headerLine.substringAfter(":").trim().toIntOrNull() ?: 0
+                }
+                headerLine = reader.readLine()
+            }
+
+            val out: OutputStream = client.getOutputStream()
+
+            if (method == "OPTIONS") {
+                val response = "HTTP/1.1 204 No Content\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n" +
+                        "Access-Control-Allow-Headers: Content-Type\r\n\r\n"
+                out.write(response.toByteArray(Charsets.UTF_8))
+                out.flush()
+                client.close()
+                return
+            }
+
+            if (path == "/api/mesh/send" && method == "POST") {
+                val bodyChars = CharArray(contentLength)
+                var readTotal = 0
+                while (readTotal < contentLength) {
+                    val read = reader.read(bodyChars, readTotal, contentLength - readTotal)
+                    if (read == -1) break
+                    readTotal += read
+                }
+                val body = String(bodyChars, 0, readTotal)
+                if (body.isNotBlank()) {
+                    deliverMeshPacket(body)
+                }
+
+                val response = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Connection: close\r\n\r\n" +
+                        "{\"status\":\"ok\"}"
+                out.write(response.toByteArray(Charsets.UTF_8))
+                out.flush()
+            } else {
+                val localIp = getLocalIpAddress()
+                val response = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Connection: close\r\n\r\n" +
+                        "{\"status\":\"ok\",\"ip\":\"$localIp\"}"
+                out.write(response.toByteArray(Charsets.UTF_8))
+                out.flush()
+            }
+            client.close()
+        } catch (e: Exception) {
+            try { client.close() } catch (ignored: Exception) {}
+        }
+    }
+
+    fun deliverMeshPacket(raw: String) {
+        runOnUiThread {
+            if (::webView.isInitialized) {
+                val jsArg = JSONObject.quote(raw)
+                webView.evaluateJavascript("if(window.onMeshPacketReceived) window.onMeshPacketReceived($jsArg);", null)
+            }
+        }
+    }
+
+    fun notifyBlePeerDiscovered(peerId: String, rssi: Int, mac: String) {
+        blePeerMap[peerId] = mac
+        // Approximate distance based on Free Space Path Loss model
+        val distance = Math.round(Math.pow(10.0, (-59.0 - rssi) / 20.0) * 10.0) / 10.0
+
+        runOnUiThread {
+            if (::webView.isInitialized) {
+                webView.evaluateJavascript("if(window.onBlePeerDiscovered) window.onBlePeerDiscovered('$peerId', $rssi, $distance, '$mac');", null)
             }
         }
     }
@@ -265,6 +415,11 @@ class MainActivity : Activity() {
             if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_CONNECT)
             }
+        } else {
+            // Android 6-11 requires fine location for BLE scanning
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -289,9 +444,13 @@ class MainActivity : Activity() {
         startMeshServiceSafe()
     }
 
-    private fun startMeshServiceSafe() {
+    fun startMeshServiceSafe(nodeId: String? = null) {
         try {
-            val serviceIntent = Intent(this, SypherMeshService::class.java)
+            val serviceIntent = Intent(this, SypherMeshService::class.java).apply {
+                if (!nodeId.isNullOrBlank()) {
+                    putExtra("EXTRA_NODE_ID", nodeId)
+                }
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
             } else {
@@ -304,11 +463,12 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         isMeshRunning = false
         try { multicastSocket?.close() } catch (e: Exception) {}
-        try {
-            if (multicastLock?.isHeld == true) multicastLock?.release()
-        } catch (e: Exception) {}
+        try { httpServerSocket?.close() } catch (e: Exception) {}
+        try { if (multicastLock?.isHeld == true) multicastLock?.release() } catch (e: Exception) {}
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (e: Exception) {}
     }
 
     @Deprecated("Deprecated in Java")
@@ -332,6 +492,11 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun sendMeshPacket(payloadJson: String) {
             activity.broadcastUdpPacket(payloadJson)
+        }
+
+        @JavascriptInterface
+        fun updateNodeIdentity(nodeId: String) {
+            activity.startMeshServiceSafe(nodeId)
         }
 
         @JavascriptInterface

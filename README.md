@@ -18,7 +18,7 @@
 [![Cryptography](https://img.shields.io/badge/E2EE-Double%20Ratchet-blue?style=for-the-badge)](docs/CRYPTO_SPEC.md)
 [![Ciphers](https://img.shields.io/badge/Cipher-ChaCha20--Poly1305-orange?style=for-the-badge)](docs/CRYPTO_SPEC.md)
 [![Zero Servers](https://img.shields.io/badge/Hosting%20Cost-%240.00%20(Serverless)-purple?style=for-the-badge)](docs/ARCHITECTURE.md)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blueviolet?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 [ 🇷🇺 **Документация на русском языке (README.ru.md)** ](README.ru.md) • [ **Download Binaries (.exe, .apk)** ](https://github.com/Avers-css/Sypher/releases)
 

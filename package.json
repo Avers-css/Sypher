@@ -26,8 +26,8 @@
     "zero-knowledge",
     "decentralized"
   ],
-  "author": "Sypher Project Team",
-  "license": "Apache-2.0",
+  "author": "Aver's & Sypher Project Team",
+  "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2"

@@ -2,8 +2,9 @@
 
 /**
  * Sypher Universal Desktop Launcher & Local Mesh Transport Daemon
- * Provides static HTTP hosting, Server-Sent Events (SSE) bridge,
- * and native UDP Multicast (239.255.77.88:7788) radio communications.
+ * Provides static HTTP hosting with smart port fallback (7788..7808),
+ * Server-Sent Events (SSE) bridge, and native UDP Multicast (239.255.77.88:7788)
+ * for Linux, macOS, and Windows.
  */
 
 import http from 'node:http';
@@ -11,13 +12,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
-import { exec, spawn } from 'node:child_process';
+import { exec } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rendererDir = path.join(__dirname, 'renderer');
 
-const HTTP_PORT = process.env.PORT || 7788;
+const BASE_HTTP_PORT = parseInt(process.env.PORT, 10) || 7788;
 const HTTP_HOST = '127.0.0.1';
 
 const MULTICAST_ADDR = '239.255.77.88';
@@ -36,18 +37,17 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-// 1. Инициализация UDP Multicast сокета для общения без серверов
+// 1. Инициализация локального радиосокета UDP Multicast
 function initUdpMulticast() {
   try {
     const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
     socket.on('error', (err) => {
-      console.warn('[UDP Multicast] Socket warning:', err.message);
+      console.warn('[UDP Multicast] Socket notice:', err.message);
     });
 
-    socket.on('message', (msg, rinfo) => {
+    socket.on('message', (msg) => {
       const raw = msg.toString('utf8');
-      // Транслируем входящий пакет во все открытые вкладки веб-интерфейса через SSE
       for (const client of sseClients) {
         try {
           client.write(`data: ${raw}\n\n`);
@@ -60,13 +60,15 @@ function initUdpMulticast() {
     socket.bind(MULTICAST_PORT, () => {
       try {
         socket.addMembership(MULTICAST_ADDR);
+      } catch (e) {
+        console.warn('[!] Multicast membership notice:', e.message);
+      }
+      try {
         socket.setMulticastTTL(4);
         socket.setMulticastLoopback(true);
-        udpSocket = socket;
-        console.log(`[+] UDP Multicast radio active on ${MULTICAST_ADDR}:${MULTICAST_PORT}`);
-      } catch (e) {
-        console.warn('[!] Failed to join multicast group:', e.message);
-      }
+      } catch {}
+      udpSocket = socket;
+      console.log(`[+] UDP Multicast radio active on ${MULTICAST_ADDR}:${MULTICAST_PORT}`);
     });
   } catch (err) {
     console.warn('[!] Could not initialize UDP socket:', err.message);
@@ -81,8 +83,33 @@ function broadcastUdp(rawString) {
   });
 }
 
-function startWebServer() {
+function findAvailablePort(startPort, maxAttempts = 20) {
+  return new Promise((resolve) => {
+    let port = startPort;
+    function test() {
+      const tester = http.createServer();
+      tester.once('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          port++;
+          if (port < startPort + maxAttempts) test();
+          else resolve(startPort);
+        } else {
+          resolve(port);
+        }
+      });
+      tester.once('listening', () => {
+        tester.close(() => resolve(port));
+      });
+      tester.listen(port, HTTP_HOST);
+    }
+    test();
+  });
+}
+
+async function startWebServer() {
   initUdpMulticast();
+
+  const activePort = await findAvailablePort(BASE_HTTP_PORT);
 
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
@@ -152,8 +179,8 @@ function startWebServer() {
     }
   });
 
-  server.listen(HTTP_PORT, HTTP_HOST, () => {
-    const url = `http://${HTTP_HOST}:${HTTP_PORT}`;
+  server.listen(activePort, HTTP_HOST, () => {
+    const url = `http://${HTTP_HOST}:${activePort}`;
     console.log(`
 ==============================================================
    SYPHER MESH MESSENGER (Production Desktop Engine)
@@ -185,7 +212,7 @@ function openBrowser(url) {
   } else if (platform === 'win32') {
     cmd = `start "" "${url}"`;
   } else {
-    cmd = `xdg-open "${url}" >/dev/null 2>&1 || sensible-browser "${url}" >/dev/null 2>&1`;
+    cmd = `xdg-open "${url}" >/dev/null 2>&1 || sensible-browser "${url}" >/dev/null 2>&1 || gio open "${url}" >/dev/null 2>&1 || firefox "${url}" >/dev/null 2>&1 || google-chrome "${url}" >/dev/null 2>&1 || chromium "${url}" >/dev/null 2>&1 || brave-browser "${url}" >/dev/null 2>&1`;
   }
 
   exec(cmd, (err) => {

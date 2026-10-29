@@ -9,7 +9,13 @@ echo "   Sypher Messenger (Linux)                   "
 echo "   Zero-Knowledge P2P Mesh Communication      "
 echo "=============================================="
 
-if ! command -v node &> /dev/null; then
+# Detect node or nodejs executable
+NODE_BIN=""
+if command -v node &> /dev/null; then
+    NODE_BIN="node"
+elif command -v nodejs &> /dev/null; then
+    NODE_BIN="nodejs"
+else
     echo "[!] Node.js is not found. Please install Node.js (v20+):"
     echo "    Ubuntu/Debian: sudo apt update && sudo apt install -y nodejs npm"
     echo "    Arch Linux:    sudo pacman -S nodejs npm"
@@ -17,13 +23,6 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
-echo "[*] Checking core build..."
-if [ ! -d "packages/core/dist" ]; then
-    npm run build
-fi
-
-echo "[*] Launching Sypher Desktop UI..."
-node packages/desktop/src/launcher.js || (
-    echo "[*] Fallback: Starting Headless Mesh Daemon & CLI..."
-    cd packages/cli && node src/index.js daemon
-)
+echo "[*] Node.js runtime detected: $($NODE_BIN -v)"
+echo "[*] Starting Sypher Universal Mesh Node..."
+$NODE_BIN packages/desktop/src/launcher.js

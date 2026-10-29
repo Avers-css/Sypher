@@ -9,14 +9,20 @@ echo "   Zero-Knowledge P2P Mesh Communication      "
 echo "=============================================="
 
 if ! command -v node &> /dev/null; then
-    echo "[!] Node.js not detected. Please install Node.js (https://nodejs.org or 'brew install node')."
-    read -p "Press enter to exit..."
+    echo "[!] Node.js is not detected on your Mac."
+    echo "    To install, visit: https://nodejs.org or run 'brew install node'"
+    echo ""
+    read -p "Press Enter to exit..."
     exit 1
 fi
 
-if [ ! -d "packages/core/dist" ]; then
-    npm run build
-fi
+echo "[*] Node.js runtime detected: $(node -v)"
+echo "[*] Starting Sypher Mesh Node & Desktop UI..."
 
-echo "[*] Launching Sypher on macOS..."
 node packages/desktop/src/launcher.js
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+    echo ""
+    echo "[!] Sypher stopped with exit code $STATUS."
+    read -p "Press Enter to close this window..."
+fi

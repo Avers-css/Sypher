@@ -3,12 +3,13 @@
 /**
  * Sypher Universal Desktop Launcher & Local Mesh Transport Daemon
  * Provides static HTTP hosting with smart port fallback (7788..7808),
- * Server-Sent Events (SSE) bridge, and native UDP Multicast (239.255.77.88:7788)
- * for Linux, macOS, and Windows.
+ * Server-Sent Events (SSE) bridge, dual UDP Multicast (239.255.77.88:7788)
+ * and Subnet Broadcast (255.255.255.255:7788) for Linux, macOS, and Windows.
  */
 
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
@@ -19,9 +20,10 @@ const __dirname = path.dirname(__filename);
 const rendererDir = path.join(__dirname, 'renderer');
 
 const BASE_HTTP_PORT = parseInt(process.env.PORT, 10) || 7788;
-const HTTP_HOST = '127.0.0.1';
+const HTTP_HOST = '0.0.0.0';
 
 const MULTICAST_ADDR = '239.255.77.88';
+const BROADCAST_ADDR = '255.255.255.255';
 const MULTICAST_PORT = 7788;
 
 const sseClients = new Set();
@@ -37,7 +39,18 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-// 1. Инициализация локального радиосокета UDP Multicast
+function getLocalIp() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
+
 function initUdpMulticast() {
   try {
     const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -64,11 +77,14 @@ function initUdpMulticast() {
         console.warn('[!] Multicast membership notice:', e.message);
       }
       try {
+        socket.setBroadcast(true);
+      } catch {}
+      try {
         socket.setMulticastTTL(4);
         socket.setMulticastLoopback(true);
       } catch {}
       udpSocket = socket;
-      console.log(`[+] UDP Multicast radio active on ${MULTICAST_ADDR}:${MULTICAST_PORT}`);
+      console.log(`[+] UDP Mesh radio active on port ${MULTICAST_PORT} (Multicast & Broadcast)`);
     });
   } catch (err) {
     console.warn('[!] Could not initialize UDP socket:', err.message);
@@ -78,9 +94,12 @@ function initUdpMulticast() {
 function broadcastUdp(rawString) {
   if (!udpSocket) return;
   const buffer = Buffer.from(rawString, 'utf8');
-  udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, MULTICAST_ADDR, (err) => {
-    if (err) console.error('[UDP] Send error:', err.message);
-  });
+
+  // 1. Multicast send
+  udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, MULTICAST_ADDR, () => {});
+
+  // 2. Subnet Broadcast send (bypasses router multicast filters)
+  udpSocket.send(buffer, 0, buffer.length, MULTICAST_PORT, BROADCAST_ADDR, () => {});
 }
 
 function findAvailablePort(startPort, maxAttempts = 20) {
@@ -100,7 +119,7 @@ function findAvailablePort(startPort, maxAttempts = 20) {
       tester.once('listening', () => {
         tester.close(() => resolve(port));
       });
-      tester.listen(port, HTTP_HOST);
+      tester.listen(port, '127.0.0.1');
     }
     test();
   });
@@ -110,9 +129,10 @@ async function startWebServer() {
   initUdpMulticast();
 
   const activePort = await findAvailablePort(BASE_HTTP_PORT);
+  const myIp = getLocalIp();
 
   const server = http.createServer((req, res) => {
-    const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+    const parsedUrl = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
     const pathname = parsedUrl.pathname;
 
     // API: Server-Sent Events для моментальной доставки входящих пакетов
@@ -129,6 +149,16 @@ async function startWebServer() {
       req.on('close', () => {
         sseClients.delete(res);
       });
+      return;
+    }
+
+    // API: Определение локального IP
+    if (pathname === '/api/mesh/ip') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(JSON.stringify({ ip: getLocalIp() }));
       return;
     }
 
@@ -180,18 +210,19 @@ async function startWebServer() {
   });
 
   server.listen(activePort, HTTP_HOST, () => {
-    const url = `http://${HTTP_HOST}:${activePort}`;
+    const localUrl = `http://127.0.0.1:${activePort}`;
+    const lanUrl = `http://${myIp}:${activePort}`;
     console.log(`
 ==============================================================
    SYPHER MESH MESSENGER (Production Desktop Engine)
    Zero-Knowledge, Anonymous, Serverless P2P Messenger
 ==============================================================
-  [+] Active at:   ${url}
-  [+] Radio Mesh:  UDP Multicast ${MULTICAST_ADDR}:${MULTICAST_PORT}
-  [+] Routing:     Ad-hoc Peer-to-Peer / Local Wi-Fi / Hotspot
+  [+] Local Web:   ${localUrl}
+  [+] Network IP:  ${lanUrl}
+  [+] Radio Mesh:  UDP Multicast ${MULTICAST_ADDR}:${MULTICAST_PORT} & Subnet Broadcast
 ==============================================================
 `);
-    openBrowser(url);
+    openBrowser(localUrl);
   });
 
   process.on('SIGINT', () => {
@@ -217,7 +248,7 @@ function openBrowser(url) {
 
   exec(cmd, (err) => {
     if (err) {
-      console.log(`[*] Please open your browser at: ${url}`);
+      console.log(`[*] Please navigate to ${url} in your browser.`);
     }
   });
 }

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Cyber Hex Shield -->
+    <path
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M54,20 L82,34 L82,64 L54,88 L26,64 L26,34 Z" />
+
+    <!-- Inner Shield Accent -->
+    <path
+        android:strokeColor="#00FFAA"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M54,28 L74,38 L74,60 L54,78 L34,60 L34,38 Z" />
+
+    <!-- Central Cipher Lock Core -->
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M54,42 A6,6 0 0 1 60,48 L62,58 L46,58 L48,48 A6,6 0 0 1 54,42 Z" />
+
+    <!-- Radiating Mesh Nodes -->
+    <path
+        android:fillColor="#00FFAA"
+        android:pathData="M54,66 A3,3 0 1 1 54,60 A3,3 0 1 1 54,66 Z" />
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M42,52 A2.5,2.5 0 1 1 42,47 A2.5,2.5 0 1 1 42,52 Z" />
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M66,52 A2.5,2.5 0 1 1 66,47 A2.5,2.5 0 1 1 66,52 Z" />
+</vector>

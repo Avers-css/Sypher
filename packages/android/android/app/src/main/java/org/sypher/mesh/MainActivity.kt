@@ -7,12 +7,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.JsResult
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -20,14 +22,17 @@ import android.webkit.WebViewClient
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.MulticastSocket
+import java.net.NetworkInterface
 import kotlin.concurrent.thread
 
 /**
  * Main Activity for Sypher Android Client.
- * Displays the hardware-accelerated dark glassmorphism messenger interface,
- * bridges JavaScript to local UDP Multicast (239.255.77.88:7788),
+ * Displays the dark glassmorphism messenger interface,
+ * bridges JavaScript to local UDP Multicast (239.255.77.88:7788) & Subnet Broadcast,
+ * handles native file choosing for encrypted file sharing,
  * and coordinates with the background SypherMeshService BLE radio.
  */
 class MainActivity : Activity() {
@@ -35,7 +40,9 @@ class MainActivity : Activity() {
     companion object {
         private const val TAG = "SypherMainActivity"
         private const val PERMISSION_REQUEST_CODE = 42
+        private const val FILE_CHOOSER_REQUEST_CODE = 1001
         const val MULTICAST_GROUP = "239.255.77.88"
+        const val BROADCAST_ADDR = "255.255.255.255"
         const val MULTICAST_PORT = 7788
     }
 
@@ -43,16 +50,17 @@ class MainActivity : Activity() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var isMeshRunning = true
     private var multicastSocket: MulticastSocket? = null
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         try {
-            window.decorView.setBackgroundColor(Color.parseColor("#0A0D14"))
+            window.decorView.setBackgroundColor(Color.parseColor("#07090E"))
 
             webView = WebView(this).apply {
-                setBackgroundColor(Color.parseColor("#0A0D14"))
+                setBackgroundColor(Color.parseColor("#07090E"))
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
@@ -70,10 +78,33 @@ class MainActivity : Activity() {
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         Log.i(TAG, "Sypher UI loaded successfully: $url")
+                        // Push detected local IP to web interface
+                        val localIp = getLocalIpAddress()
+                        view?.evaluateJavascript("if(window.onLocalIpDetected) window.onLocalIpDetected('$localIp');", null)
                     }
                 }
 
                 webChromeClient = object : WebChromeClient() {
+                    // 1. Native File Chooser for Encrypted File Attachments
+                    override fun onShowFileChooser(
+                        mWebView: WebView?,
+                        filePathCallback: ValueCallback<Array<Uri>>?,
+                        fileChooserParams: FileChooserParams?
+                    ): Boolean {
+                        this@MainActivity.filePathCallback?.onReceiveValue(null)
+                        this@MainActivity.filePathCallback = filePathCallback
+
+                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                        startActivityForResult(
+                            Intent.createChooser(intent, "Выберите файл для шифрования и отправки"),
+                            FILE_CHOOSER_REQUEST_CODE
+                        )
+                        return true
+                    }
+
                     override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
                         AlertDialog.Builder(this@MainActivity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
                             .setTitle("Sypher")
@@ -102,7 +133,7 @@ class MainActivity : Activity() {
             setContentView(webView)
             webView.loadUrl("file:///android_asset/index.html")
 
-            // Start native UDP Multicast listener for Wi-Fi / Hotspot radio communication
+            // Start native UDP Multicast & Broadcast listener
             startUdpMulticastListener()
 
             // Request runtime permissions on Android 12+ and start BLE mesh service
@@ -113,16 +144,46 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
+            val results = if (resultCode == Activity.RESULT_OK && data != null) {
+                val uri = data.data
+                if (uri != null) arrayOf(uri) else null
+            } else null
+            filePathCallback?.onReceiveValue(results)
+            filePathCallback = null
+        }
+    }
+
     fun broadcastUdpPacket(payloadJson: String) {
         thread(name = "SypherUdpSender", isDaemon = true) {
             try {
-                val group = InetAddress.getByName(MULTICAST_GROUP)
-                val socket = DatagramSocket()
+                val socket = DatagramSocket().apply {
+                    broadcast = true
+                }
                 val bytes = payloadJson.toByteArray(Charsets.UTF_8)
-                val packet = DatagramPacket(bytes, bytes.size, group, MULTICAST_PORT)
-                socket.send(packet)
+
+                // 1. Send via Multicast
+                try {
+                    val mGroup = InetAddress.getByName(MULTICAST_GROUP)
+                    val mPacket = DatagramPacket(bytes, bytes.size, mGroup, MULTICAST_PORT)
+                    socket.send(mPacket)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Multicast send error: ${e.message}")
+                }
+
+                // 2. Send via Subnet Broadcast (bypasses router IGMP/multicast filters)
+                try {
+                    val bGroup = InetAddress.getByName(BROADCAST_ADDR)
+                    val bPacket = DatagramPacket(bytes, bytes.size, bGroup, MULTICAST_PORT)
+                    socket.send(bPacket)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Broadcast send error: ${e.message}")
+                }
+
                 socket.close()
-                Log.d(TAG, "Broadcast UDP packet (${bytes.size} bytes) to $MULTICAST_GROUP:$MULTICAST_PORT")
+                Log.d(TAG, "Transmitted packet (${bytes.size} bytes) to Mesh")
             } catch (e: Exception) {
                 Log.e(TAG, "UDP send error: ${e.message}")
             }
@@ -136,7 +197,7 @@ class MainActivity : Activity() {
                 setReferenceCounted(true)
                 acquire()
             }
-            Log.i(TAG, "MulticastLock acquired successfully")
+            Log.i(TAG, "MulticastLock acquired")
         } catch (e: Exception) {
             Log.w(TAG, "Could not acquire MulticastLock: ${e.message}")
         }
@@ -146,11 +207,12 @@ class MainActivity : Activity() {
                 val group = InetAddress.getByName(MULTICAST_GROUP)
                 val socket = MulticastSocket(MULTICAST_PORT).apply {
                     reuseAddress = true
+                    broadcast = true
                     joinGroup(group)
                 }
                 multicastSocket = socket
                 val buffer = ByteArray(65535)
-                Log.i(TAG, "UDP Multicast listener active on $MULTICAST_GROUP:$MULTICAST_PORT")
+                Log.i(TAG, "UDP radio listener active on port $MULTICAST_PORT")
 
                 while (isMeshRunning) {
                     val packet = DatagramPacket(buffer, buffer.size)
@@ -165,9 +227,29 @@ class MainActivity : Activity() {
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "UDP multicast listener stopped: ${e.message}")
+                Log.w(TAG, "UDP listener stopped: ${e.message}")
             }
         }
+    }
+
+    fun getLocalIpAddress(): String {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (iface.isLoopback || !iface.isUp) continue
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
+                        return addr.hostAddress ?: ""
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error obtaining local IP: ${e.message}")
+        }
+        return "127.0.0.1"
     }
 
     private fun checkAndRequestPermissions() {
@@ -223,13 +305,9 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         isMeshRunning = false
+        try { multicastSocket?.close() } catch (e: Exception) {}
         try {
-            multicastSocket?.close()
-        } catch (e: Exception) {}
-        try {
-            if (multicastLock?.isHeld == true) {
-                multicastLock?.release()
-            }
+            if (multicastLock?.isHeld == true) multicastLock?.release()
         } catch (e: Exception) {}
     }
 
@@ -254,6 +332,11 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun sendMeshPacket(payloadJson: String) {
             activity.broadcastUdpPacket(payloadJson)
+        }
+
+        @JavascriptInterface
+        fun getLocalIp(): String {
+            return activity.getLocalIpAddress()
         }
 
         @JavascriptInterface
